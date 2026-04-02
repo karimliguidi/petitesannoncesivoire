@@ -23,7 +23,7 @@ async function authMiddleware(c: any, next: any) {
 
 export const listingsRoutes = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
-// GET /api/listings — liste publique avec filtres
+// GET /api/listings — liste publique avec filtres (sans image_data pour la perf)
 listingsRoutes.get('/', async (c) => {
   try {
     const category = c.req.query('category')
@@ -33,7 +33,8 @@ listingsRoutes.get('/', async (c) => {
 
     let query = `
       SELECT l.id, l.title, l.description, l.category, l.price, l.location, l.contact,
-             l.status, l.created_at, u.name as author_name
+             l.status, l.created_at, u.name as author_name,
+             CASE WHEN l.image_data IS NOT NULL AND l.image_data != '' THEN 1 ELSE 0 END as has_image
       FROM listings l
       JOIN users u ON l.user_id = u.id
       WHERE l.status = 'active'
@@ -60,13 +61,13 @@ listingsRoutes.get('/', async (c) => {
   }
 })
 
-// GET /api/listings/:id — détail d'une annonce
+// GET /api/listings/:id — détail d'une annonce (avec image_data)
 listingsRoutes.get('/:id', async (c) => {
   try {
     const id = parseInt(c.req.param('id'))
     const listing = await c.env.DB.prepare(`
       SELECT l.id, l.title, l.description, l.category, l.price, l.location, l.contact,
-             l.status, l.created_at, l.user_id, u.name as author_name
+             l.status, l.created_at, l.user_id, l.image_data, u.name as author_name
       FROM listings l
       JOIN users u ON l.user_id = u.id
       WHERE l.id = ? AND l.status = 'active'
@@ -79,19 +80,55 @@ listingsRoutes.get('/:id', async (c) => {
   }
 })
 
+// GET /api/listings/:id/image — renvoie uniquement l'image (pour les cartes)
+listingsRoutes.get('/:id/image', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'))
+    const row = await c.env.DB.prepare(
+      'SELECT image_data FROM listings WHERE id = ? AND status = \'active\''
+    ).bind(id).first<{ image_data: string | null }>()
+
+    if (!row || !row.image_data) {
+      return c.json({ error: 'Pas d\'image' }, 404)
+    }
+
+    // image_data est "data:image/jpeg;base64,..."
+    const [meta, b64] = row.image_data.split(',')
+    const mimeMatch = meta.match(/data:([^;]+)/)
+    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg'
+    const binary = atob(b64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+
+    return new Response(bytes, {
+      headers: {
+        'Content-Type': mime,
+        'Cache-Control': 'public, max-age=86400'
+      }
+    })
+  } catch (err) {
+    return c.json({ error: 'Erreur serveur' }, 500)
+  }
+})
+
 // POST /api/listings — créer une annonce (authentifié)
 listingsRoutes.post('/', authMiddleware, async (c) => {
   try {
     const userId = c.get('userId')
-    const { title, description, category, price, location, contact } = await c.req.json()
+    const { title, description, category, price, location, contact, image_data } = await c.req.json()
 
     if (!title || !description || !category) {
       return c.json({ error: 'Titre, description et catégorie sont obligatoires' }, 400)
     }
 
+    // Validation image : max ~400KB en base64
+    if (image_data && image_data.length > 550000) {
+      return c.json({ error: 'Image trop grande (max 400 Ko). Veuillez la compresser.' }, 400)
+    }
+
     const result = await c.env.DB.prepare(`
-      INSERT INTO listings (user_id, title, description, category, price, location, contact)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO listings (user_id, title, description, category, price, location, contact, image_data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       userId,
       title.trim(),
@@ -99,7 +136,8 @@ listingsRoutes.post('/', authMiddleware, async (c) => {
       category,
       price ? parseFloat(price) : null,
       location?.trim() || null,
-      contact?.trim() || null
+      contact?.trim() || null,
+      image_data || null
     ).run()
 
     return c.json({ id: result.meta.last_row_id, message: 'Annonce publiée avec succès' }, 201)
@@ -115,7 +153,6 @@ listingsRoutes.delete('/:id', authMiddleware, async (c) => {
     const userId = c.get('userId')
     const id = parseInt(c.req.param('id'))
 
-    // Vérifier que l'annonce appartient à l'utilisateur
     const listing = await c.env.DB.prepare(
       'SELECT id FROM listings WHERE id = ? AND user_id = ?'
     ).bind(id, userId).first()

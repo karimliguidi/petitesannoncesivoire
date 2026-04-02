@@ -3,9 +3,9 @@
 // ============================================================
 
 const CATEGORIES = [
-  { name: 'Véhicules',    icon: 'fa-car',          color: 'blue' },
-  { name: 'Immobilier',   icon: 'fa-home',         color: 'green' },
-  { name: 'Électronique', icon: 'fa-mobile-alt',   color: 'purple' },
+  { name: 'Véhicules',    icon: 'fa-car',           color: 'blue' },
+  { name: 'Immobilier',   icon: 'fa-home',          color: 'green' },
+  { name: 'Électronique', icon: 'fa-mobile-alt',    color: 'purple' },
   { name: 'Mode',         icon: 'fa-tshirt',        color: 'pink' },
   { name: 'Maison',       icon: 'fa-couch',         color: 'yellow' },
   { name: 'Loisirs',      icon: 'fa-futbol',        color: 'red' },
@@ -42,6 +42,7 @@ const BADGE_COLOR = {
 let currentUser = null
 let authToken = null
 let activeFilter = null
+let pendingImageData = null   // base64 de l'image en attente
 
 // ── Init ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -67,13 +68,14 @@ function showPage(page) {
   })
   if (page === 'dashboard') loadDashboard()
   if (page === 'home') loadListings()
+  if (page === 'new-listing') resetNewListingForm()
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 function updateNav() {
   const guestEl = document.getElementById('nav-guest')
-  const authEl = document.getElementById('nav-auth')
-  const nameEl = document.getElementById('nav-username')
+  const authEl  = document.getElementById('nav-auth')
+  const nameEl  = document.getElementById('nav-username')
   if (currentUser) {
     guestEl.classList.add('hidden')
     authEl.classList.remove('hidden')
@@ -87,14 +89,14 @@ function updateNav() {
 // ── Toast ────────────────────────────────────────────────────
 function showToast(msg, type = 'success') {
   const toast = document.getElementById('toast')
-  const icon = document.getElementById('toast-icon')
+  const icon  = document.getElementById('toast-icon')
   const msgEl = document.getElementById('toast-msg')
   icon.className = type === 'success'
     ? 'fas fa-check-circle text-green-400'
     : 'fas fa-exclamation-circle text-red-400'
   msgEl.textContent = msg
   toast.classList.remove('hidden')
-  setTimeout(() => toast.classList.add('hidden'), 3000)
+  setTimeout(() => toast.classList.add('hidden'), 3200)
 }
 
 // ── Catégories ───────────────────────────────────────────────
@@ -110,8 +112,7 @@ function buildCategoriesGrid() {
           <i class="fas ${cat.icon}"></i>
         </div>
         <span class="text-xs font-medium text-gray-700">${cat.name}</span>
-      </button>
-    `
+      </button>`
   }).join('')
 }
 
@@ -123,11 +124,11 @@ async function loadListings(search = '', category = '') {
   </div>`
 
   let url = '/api/listings?limit=50'
-  if (search) url += `&search=${encodeURIComponent(search)}`
+  if (search)   url += `&search=${encodeURIComponent(search)}`
   if (category) url += `&category=${encodeURIComponent(category)}`
 
   try {
-    const res = await fetch(url)
+    const res  = await fetch(url)
     const data = await res.json()
     renderListings(data.listings || [])
   } catch {
@@ -151,19 +152,27 @@ function renderListings(listings) {
 }
 
 function listingCard(l) {
-  const cat = CATEGORIES.find(c => c.name === l.category)
+  const cat   = CATEGORIES.find(c => c.name === l.category)
   const badge = cat ? BADGE_COLOR[cat.color] : 'bg-gray-50 text-gray-500 border-gray-200'
-  const icon = cat ? cat.icon : 'fa-tag'
-  const price = l.price != null ? `<span class="font-bold text-primary-600">${formatPrice(l.price)}</span>` : `<span class="text-gray-400 text-sm">Prix à débattre</span>`
-  const date = new Date(l.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+  const icon  = cat ? cat.icon : 'fa-tag'
+  const price = l.price != null
+    ? `<span class="font-bold text-primary-600">${formatPrice(l.price)}</span>`
+    : `<span class="text-gray-400 text-sm">Prix à débattre</span>`
+  const date  = new Date(l.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+
+  // Vignette : image réelle si disponible, sinon placeholder catégorie
+  const thumbnail = l.has_image
+    ? `<img src="/api/listings/${l.id}/image" alt="${escHtml(l.title)}"
+            class="w-full h-full object-cover"
+            onerror="this.parentElement.innerHTML='<i class=\\'fas ${icon} text-4xl text-gray-300\\'></i>'" />`
+    : `<i class="fas ${icon} text-4xl text-gray-300 group-hover:text-gray-400 transition"></i>`
 
   return `
   <div onclick="showListing(${l.id})"
     class="bg-white rounded-xl border border-gray-200 hover:border-primary-300 hover:shadow-md transition cursor-pointer overflow-hidden group">
-    <!-- Placeholder image / categorie -->
-    <div class="h-36 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center relative">
-      <i class="fas ${icon} text-4xl text-gray-300 group-hover:text-gray-400 transition"></i>
-      <span class="absolute top-2 left-2 text-xs font-medium px-2 py-0.5 rounded-full border ${badge}">
+    <div class="h-40 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center relative overflow-hidden">
+      ${thumbnail}
+      <span class="absolute top-2 left-2 text-xs font-medium px-2 py-0.5 rounded-full border ${badge} bg-white/90 backdrop-blur-sm">
         ${l.category}
       </span>
     </div>
@@ -197,18 +206,28 @@ async function showListing(id) {
     if (!res.ok) throw new Error()
     const { listing: l } = await res.json()
 
-    const cat = CATEGORIES.find(c => c.name === l.category)
+    const cat   = CATEGORIES.find(c => c.name === l.category)
     const badge = cat ? BADGE_COLOR[cat.color] : 'bg-gray-50 text-gray-500 border-gray-200'
-    const icon = cat ? cat.icon : 'fa-tag'
-    const price = l.price != null ? `<span class="text-3xl font-bold text-primary-600">${formatPrice(l.price)}</span>` : `<span class="text-gray-400">Prix à débattre</span>`
-    const date = new Date(l.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+    const icon  = cat ? cat.icon : 'fa-tag'
+    const price = l.price != null
+      ? `<span class="text-3xl font-bold text-primary-600">${formatPrice(l.price)}</span>`
+      : `<span class="text-gray-400">Prix à débattre</span>`
+    const date    = new Date(l.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
     const isOwner = currentUser && l.user_id === currentUser.id
+
+    // Image section
+    const imageSection = l.image_data
+      ? `<div class="relative overflow-hidden bg-gray-100" style="max-height:480px">
+           <img src="${l.image_data}" alt="${escHtml(l.title)}"
+                class="w-full object-contain max-h-96" />
+         </div>`
+      : `<div class="h-52 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+           <i class="fas ${icon} text-7xl text-gray-300"></i>
+         </div>`
 
     content.innerHTML = `
       <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
-        <div class="h-56 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-          <i class="fas ${icon} text-7xl text-gray-300"></i>
-        </div>
+        ${imageSection}
         <div class="p-6">
           <div class="flex items-start justify-between gap-4 mb-4">
             <div>
@@ -220,23 +239,25 @@ async function showListing(id) {
             ${price}
           </div>
 
-          <div class="prose prose-sm max-w-none text-gray-600 mb-6 bg-gray-50 rounded-xl p-4">
-            <p class="whitespace-pre-wrap">${escHtml(l.description)}</p>
+          <div class="text-gray-600 mb-6 bg-gray-50 rounded-xl p-4">
+            <p class="whitespace-pre-wrap text-sm leading-relaxed">${escHtml(l.description)}</p>
           </div>
 
           <div class="grid grid-cols-2 gap-4 mb-6">
             ${l.location ? `<div class="flex items-center gap-2 text-sm text-gray-600"><i class="fas fa-map-marker-alt text-primary-500 w-5"></i>${escHtml(l.location)}</div>` : ''}
-            ${l.contact ? `<div class="flex items-center gap-2 text-sm text-gray-600"><i class="fas fa-envelope text-primary-500 w-5"></i>${escHtml(l.contact)}</div>` : ''}
+            ${l.contact  ? `<div class="flex items-center gap-2 text-sm text-gray-600"><i class="fas fa-envelope text-primary-500 w-5"></i>${escHtml(l.contact)}</div>` : ''}
             <div class="flex items-center gap-2 text-sm text-gray-600"><i class="fas fa-user text-primary-500 w-5"></i>${escHtml(l.author_name)}</div>
             <div class="flex items-center gap-2 text-sm text-gray-600"><i class="fas fa-calendar text-primary-500 w-5"></i>${date}</div>
           </div>
 
           ${isOwner ? `
             <div class="flex gap-3 pt-4 border-t border-gray-100">
-              <button onclick="deleteListing(${l.id})" class="flex-1 bg-red-50 text-red-600 hover:bg-red-100 py-2 rounded-xl font-medium text-sm transition">
-                <i class="fas fa-trash mr-2"></i>Supprimer l'annonce
+              <button onclick="deleteListing(${l.id})"
+                class="flex-1 bg-red-50 text-red-600 hover:bg-red-100 py-2 rounded-xl font-medium text-sm transition">
+                <i class="fas fa-trash mr-2"></i>Supprimer
               </button>
-              <button onclick="archiveListing(${l.id})" class="flex-1 bg-gray-100 text-gray-600 hover:bg-gray-200 py-2 rounded-xl font-medium text-sm transition">
+              <button onclick="archiveListing(${l.id})"
+                class="flex-1 bg-gray-100 text-gray-600 hover:bg-gray-200 py-2 rounded-xl font-medium text-sm transition">
                 <i class="fas fa-archive mr-2"></i>Archiver
               </button>
             </div>` : ''}
@@ -250,7 +271,7 @@ async function showListing(id) {
   }
 }
 
-// ── Filtres ───────────────────────────────────────────────────
+// ── Filtres & Recherche ───────────────────────────────────────
 function filterByCategory(category) {
   activeFilter = category
   document.getElementById('listings-title').textContent = `Annonces : ${category}`
@@ -275,11 +296,8 @@ function searchListings() {
   window.scrollTo({ top: 400, behavior: 'smooth' })
 }
 
-// Recherche sur Entrée
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && document.activeElement.id === 'search-input') {
-    searchListings()
-  }
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.activeElement.id === 'search-input') searchListings()
 })
 
 // ── Auth ──────────────────────────────────────────────────────
@@ -288,12 +306,12 @@ async function handleRegister(e) {
   const errEl = document.getElementById('reg-error')
   errEl.classList.add('hidden')
 
-  const name = document.getElementById('reg-name').value.trim()
-  const email = document.getElementById('reg-email').value.trim()
+  const name     = document.getElementById('reg-name').value.trim()
+  const email    = document.getElementById('reg-email').value.trim()
   const password = document.getElementById('reg-password').value
 
   try {
-    const res = await fetch('/api/auth/register', {
+    const res  = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, email, password })
@@ -301,7 +319,7 @@ async function handleRegister(e) {
     const data = await res.json()
     if (!res.ok) { errEl.textContent = data.error; errEl.classList.remove('hidden'); return }
 
-    authToken = data.token
+    authToken   = data.token
     currentUser = data.user
     localStorage.setItem('auth', JSON.stringify({ token: authToken, user: currentUser }))
     updateNav()
@@ -318,11 +336,11 @@ async function handleLogin(e) {
   const errEl = document.getElementById('login-error')
   errEl.classList.add('hidden')
 
-  const email = document.getElementById('login-email').value.trim()
+  const email    = document.getElementById('login-email').value.trim()
   const password = document.getElementById('login-password').value
 
   try {
-    const res = await fetch('/api/auth/login', {
+    const res  = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
@@ -330,7 +348,7 @@ async function handleLogin(e) {
     const data = await res.json()
     if (!res.ok) { errEl.textContent = data.error; errEl.classList.remove('hidden'); return }
 
-    authToken = data.token
+    authToken   = data.token
     currentUser = data.user
     localStorage.setItem('auth', JSON.stringify({ token: authToken, user: currentUser }))
     updateNav()
@@ -343,12 +361,98 @@ async function handleLogin(e) {
 }
 
 function logout() {
-  authToken = null
+  authToken   = null
   currentUser = null
   localStorage.removeItem('auth')
   updateNav()
   showPage('home')
-  showToast('Déconnexion réussie', 'success')
+  showToast('Déconnexion réussie')
+}
+
+// ── Gestion de l'image ────────────────────────────────────────
+function resetNewListingForm() {
+  pendingImageData = null
+  const preview = document.getElementById('img-preview')
+  const zone    = document.getElementById('img-upload-zone')
+  if (preview) { preview.src = ''; preview.classList.add('hidden') }
+  if (zone)    zone.classList.remove('hidden')
+  const input = document.getElementById('nl-image')
+  if (input) input.value = ''
+  const infoEl = document.getElementById('img-info')
+  if (infoEl) infoEl.textContent = ''
+}
+
+function handleImageSelect(input) {
+  const file = input.files[0]
+  if (!file) return
+
+  // Vérif type
+  if (!file.type.startsWith('image/')) {
+    showToast('Veuillez sélectionner une image (JPG, PNG, WEBP)', 'error')
+    input.value = ''
+    return
+  }
+
+  // Vérif taille brute (max 5 Mo avant compression)
+  if (file.size > 5 * 1024 * 1024) {
+    showToast('Image trop grande. Maximum 5 Mo.', 'error')
+    input.value = ''
+    return
+  }
+
+  // Compression via Canvas
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    const img = new Image()
+    img.onload = () => {
+      // Redimensionner si > 1200px
+      const MAX = 1200
+      let w = img.width
+      let h = img.height
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX }
+        else       { w = Math.round(w * MAX / h); h = MAX }
+      }
+
+      const canvas  = document.createElement('canvas')
+      canvas.width  = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0, w, h)
+
+      // Compression JPEG qualité 0.82
+      const compressed = canvas.toDataURL('image/jpeg', 0.82)
+      pendingImageData = compressed
+
+      // Afficher la preview
+      const preview   = document.getElementById('img-preview')
+      const zone      = document.getElementById('img-upload-zone')
+      const removeBtn = document.getElementById('img-remove-btn')
+      preview.src     = compressed
+      preview.classList.remove('hidden')
+      zone.classList.add('hidden')
+      if (removeBtn) removeBtn.classList.remove('hidden')
+
+      // Info taille
+      const kb = Math.round(compressed.length * 0.75 / 1024)
+      document.getElementById('img-info').textContent = `${w}×${h}px — ${kb} Ko`
+    }
+    img.src = e.target.result
+  }
+  reader.readAsDataURL(file)
+}
+
+function removeImage() {
+  pendingImageData = null
+  const preview   = document.getElementById('img-preview')
+  const zone      = document.getElementById('img-upload-zone')
+  const removeBtn = document.getElementById('img-remove-btn')
+  preview.src     = ''
+  preview.classList.add('hidden')
+  zone.classList.remove('hidden')
+  if (removeBtn) removeBtn.classList.add('hidden')
+  document.getElementById('nl-image').value = ''
+  document.getElementById('img-info').textContent = ''
 }
 
 // ── Nouvelle annonce ──────────────────────────────────────────
@@ -359,30 +463,53 @@ async function handleNewListing(e) {
   const errEl = document.getElementById('nl-error')
   errEl.classList.add('hidden')
 
-  const title = document.getElementById('nl-title').value.trim()
-  const category = document.getElementById('nl-category').value
-  const price = document.getElementById('nl-price').value
+  const title       = document.getElementById('nl-title').value.trim()
+  const category    = document.getElementById('nl-category').value
+  const price       = document.getElementById('nl-price').value
   const description = document.getElementById('nl-description').value.trim()
-  const location = document.getElementById('nl-location').value.trim()
-  const contact = document.getElementById('nl-contact').value.trim()
+  const location    = document.getElementById('nl-location').value.trim()
+  const contact     = document.getElementById('nl-contact').value.trim()
+
+  // Vérif taille image (max ~400Ko en base64 ≈ 550 000 chars)
+  if (pendingImageData && pendingImageData.length > 550000) {
+    errEl.textContent = 'Image trop volumineuse après compression. Essayez une image plus petite.'
+    errEl.classList.remove('hidden')
+    return
+  }
+
+  const submitBtn = e.target.querySelector('[type="submit"]')
+  submitBtn.disabled = true
+  submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Publication...'
 
   try {
-    const res = await fetch('/api/listings', {
+    const res  = await fetch('/api/listings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-      body: JSON.stringify({ title, category, price: price ? parseFloat(price) : null, description, location, contact })
+      body: JSON.stringify({
+        title, category,
+        price:      price ? parseFloat(price) : null,
+        description, location, contact,
+        image_data: pendingImageData || null
+      })
     })
     const data = await res.json()
-    if (!res.ok) { errEl.textContent = data.error; errEl.classList.remove('hidden'); return }
+    if (!res.ok) {
+      errEl.textContent = data.error
+      errEl.classList.remove('hidden')
+      return
+    }
 
-    // Reset form
     e.target.reset()
+    resetNewListingForm()
     showToast('Annonce publiée avec succès ! 🎉')
     showPage('home')
     loadListings()
   } catch {
     errEl.textContent = 'Erreur serveur lors de la publication'
     errEl.classList.remove('hidden')
+  } finally {
+    submitBtn.disabled = false
+    submitBtn.innerHTML = '<i class="fas fa-paper-plane mr-2"></i>Publier l\'annonce'
   }
 }
 
@@ -392,7 +519,7 @@ async function loadDashboard() {
 
   // Stats
   try {
-    const res = await fetch('/api/users/me/stats', { headers: { 'Authorization': `Bearer ${authToken}` } })
+    const res   = await fetch('/api/users/me/stats', { headers: { 'Authorization': `Bearer ${authToken}` } })
     const stats = await res.json()
     document.getElementById('user-stats').innerHTML = `
       <div class="bg-white rounded-xl border border-gray-200 p-5 text-center">
@@ -401,13 +528,12 @@ async function loadDashboard() {
       </div>
       <div class="bg-white rounded-xl border border-gray-200 p-5 text-center">
         <div class="text-3xl font-bold text-gray-400">${stats.archived}</div>
-        <div class="text-sm text-gray-500 mt-1"><i class="fas fa-archive text-gray-400 mr-1"></i>Annonces archivées</div>
+        <div class="text-sm text-gray-500 mt-1"><i class="fas fa-archive text-gray-400 mr-1"></i>Archivées</div>
       </div>
       <div class="bg-white rounded-xl border border-gray-200 p-5 text-center">
         <div class="text-3xl font-bold text-accent-500">${stats.total}</div>
         <div class="text-sm text-gray-500 mt-1"><i class="fas fa-list text-accent-500 mr-1"></i>Total publié</div>
-      </div>
-    `
+      </div>`
   } catch {}
 
   // Mes annonces
@@ -428,24 +554,31 @@ async function loadDashboard() {
     }
 
     container.innerHTML = listings.map(l => {
-      const cat = CATEGORIES.find(c => c.name === l.category)
-      const badge = cat ? BADGE_COLOR[cat.color] : 'bg-gray-50 text-gray-500 border-gray-200'
+      const cat    = CATEGORIES.find(c => c.name === l.category)
+      const badge  = cat ? BADGE_COLOR[cat.color] : 'bg-gray-50 text-gray-500 border-gray-200'
       const status = l.status === 'active'
         ? '<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Active</span>'
         : '<span class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Archivée</span>'
-      const date = new Date(l.created_at).toLocaleDateString('fr-FR')
+      const date  = new Date(l.created_at).toLocaleDateString('fr-FR')
       const price = l.price != null ? formatPrice(l.price) : 'À débattre'
 
       return `
         <div class="bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-between gap-4">
-          <div class="flex items-center gap-4 flex-1 min-w-0">
+          <div class="flex items-center gap-3 flex-1 min-w-0">
+            <!-- Thumbnail miniature -->
+            <div class="w-14 h-14 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 flex items-center justify-center">
+              ${l.has_image
+                ? `<img src="/api/listings/${l.id}/image" class="w-full h-full object-cover"
+                       onerror="this.parentElement.innerHTML='<i class=\\'fas fa-image text-gray-300 text-xl\\'></i>'" />`
+                : `<i class="fas ${cat ? cat.icon : 'fa-tag'} text-gray-300 text-xl"></i>`}
+            </div>
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 mb-1">
+              <div class="flex items-center gap-2 mb-1 flex-wrap">
                 <span class="text-xs font-medium px-2 py-0.5 rounded-full border ${badge}">${l.category}</span>
                 ${status}
               </div>
               <h4 class="font-semibold text-gray-800 text-sm truncate">${escHtml(l.title)}</h4>
-              <p class="text-xs text-gray-400 mt-0.5">${price} • ${date}</p>
+              <p class="text-xs text-gray-400 mt-0.5">${price} · ${date}</p>
             </div>
           </div>
           <div class="flex gap-2 shrink-0">
@@ -471,14 +604,10 @@ async function deleteListing(id, fromDashboard = false) {
     })
     if (res.ok) {
       showToast('Annonce supprimée')
-      if (fromDashboard) { loadDashboard() }
+      if (fromDashboard) loadDashboard()
       else { showPage('home'); loadListings() }
-    } else {
-      showToast('Impossible de supprimer cette annonce', 'error')
-    }
-  } catch {
-    showToast('Erreur serveur', 'error')
-  }
+    } else showToast('Impossible de supprimer cette annonce', 'error')
+  } catch { showToast('Erreur serveur', 'error') }
 }
 
 async function archiveListing(id) {
@@ -491,12 +620,8 @@ async function archiveListing(id) {
       showToast('Annonce archivée')
       showPage('home')
       loadListings()
-    } else {
-      showToast('Impossible d\'archiver', 'error')
-    }
-  } catch {
-    showToast('Erreur serveur', 'error')
-  }
+    } else showToast("Impossible d'archiver", 'error')
+  } catch { showToast('Erreur serveur', 'error') }
 }
 
 // ── Utilitaires ───────────────────────────────────────────────

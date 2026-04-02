@@ -254,6 +254,43 @@ app.get('*', (c) => {
               <input type="text" id="nl-contact" placeholder="Email ou téléphone" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
           </div>
+
+          <!-- Champ image -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              <i class="fas fa-camera mr-1 text-gray-400"></i>Photo de l'annonce
+              <span class="text-gray-400 font-normal">(facultatif — max 5 Mo)</span>
+            </label>
+
+            <!-- Zone de dépôt / clic -->
+            <div id="img-upload-zone"
+              onclick="document.getElementById('nl-image').click()"
+              ondragover="event.preventDefault(); this.classList.add('border-primary-400','bg-primary-50')"
+              ondragleave="this.classList.remove('border-primary-400','bg-primary-50')"
+              ondrop="event.preventDefault(); this.classList.remove('border-primary-400','bg-primary-50'); const f=event.dataTransfer.files[0]; if(f){ const inp=document.getElementById('nl-image'); const dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files; handleImageSelect(inp); }"
+              class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50 transition">
+              <i class="fas fa-cloud-upload-alt text-3xl text-gray-300 mb-2"></i>
+              <p class="text-sm text-gray-500 font-medium">Cliquez ou glissez une image ici</p>
+              <p class="text-xs text-gray-400 mt-1">JPG, PNG, WEBP — max 5 Mo</p>
+            </div>
+
+            <!-- Input file caché -->
+            <input type="file" id="nl-image" accept="image/*" class="hidden"
+              onchange="handleImageSelect(this)" />
+
+            <!-- Preview + bouton supprimer -->
+            <div class="relative mt-2">
+              <img id="img-preview" src="" alt="Aperçu"
+                class="hidden w-full max-h-64 object-contain rounded-xl border border-gray-200 bg-gray-50" />
+              <button type="button" id="img-remove-btn"
+                onclick="removeImage()"
+                class="absolute top-2 right-2 hidden bg-red-500 hover:bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center shadow transition text-xs">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            <p id="img-info" class="text-xs text-gray-400 mt-1 text-right"></p>
+          </div>
+
           <div id="nl-error" class="hidden text-sm text-red-600 bg-red-50 px-4 py-2 rounded-lg"></div>
           <div class="flex gap-3 pt-2">
             <button type="button" onclick="showPage('home')" class="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-xl font-medium hover:bg-gray-50 transition text-sm">
