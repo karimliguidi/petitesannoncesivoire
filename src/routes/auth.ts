@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { Bindings } from '../index'
 
 // Utilitaire hash de mot de passe via Web Crypto (compatible Cloudflare Workers)
-async function hashPassword(password: string): Promise<string> {
+export async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder()
   const data = encoder.encode(password)
   const hashBuffer = await crypto.subtle.digest('SHA-256', data)

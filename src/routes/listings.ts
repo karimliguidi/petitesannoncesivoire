@@ -23,13 +23,17 @@ async function authMiddleware(c: any, next: any) {
 
 export const listingsRoutes = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
-// GET /api/listings — liste publique avec filtres (sans image_data pour la perf)
+// GET /api/listings — liste publique avec filtres avancés (sans image_data pour la perf)
 listingsRoutes.get('/', async (c) => {
   try {
-    const category = c.req.query('category')
-    const search = c.req.query('search')
-    const limit = parseInt(c.req.query('limit') || '50')
-    const offset = parseInt(c.req.query('offset') || '0')
+    const category  = c.req.query('category')
+    const search    = c.req.query('search')
+    const location  = c.req.query('location')
+    const min_price = c.req.query('min_price')
+    const max_price = c.req.query('max_price')
+    const sort      = c.req.query('sort') || 'recent'   // recent | price_asc | price_desc
+    const limit     = parseInt(c.req.query('limit') || '50')
+    const offset    = parseInt(c.req.query('offset') || '0')
 
     let query = `
       SELECT l.id, l.title, l.description, l.category, l.price, l.location, l.contact,
@@ -41,20 +45,33 @@ listingsRoutes.get('/', async (c) => {
     `
     const params: any[] = []
 
-    if (category) {
-      query += ' AND l.category = ?'
-      params.push(category)
-    }
-    if (search) {
-      query += ' AND (l.title LIKE ? OR l.description LIKE ?)'
-      params.push(`%${search}%`, `%${search}%`)
-    }
+    if (category) { query += ' AND l.category = ?'; params.push(category) }
+    if (location) { query += ' AND l.location LIKE ?'; params.push(`%${location}%`) }
+    if (search)   { query += ' AND (l.title LIKE ? OR l.description LIKE ?)'; params.push(`%${search}%`, `%${search}%`) }
+    if (min_price) { query += ' AND l.price >= ?'; params.push(parseFloat(min_price)) }
+    if (max_price) { query += ' AND l.price <= ?'; params.push(parseFloat(max_price)) }
 
-    query += ' ORDER BY l.created_at DESC LIMIT ? OFFSET ?'
+    // Tri
+    if (sort === 'price_asc')  query += ' ORDER BY l.price ASC NULLS LAST'
+    else if (sort === 'price_desc') query += ' ORDER BY l.price DESC NULLS LAST'
+    else query += ' ORDER BY l.created_at DESC'
+
+    query += ' LIMIT ? OFFSET ?'
     params.push(limit, offset)
 
     const { results } = await c.env.DB.prepare(query).bind(...params).all()
-    return c.json({ listings: results, total: results.length })
+
+    // Compter le total (pour la pagination)
+    let countQuery = `SELECT COUNT(*) as total FROM listings l WHERE l.status = 'active'`
+    const countParams: any[] = []
+    if (category)  { countQuery += ' AND l.category = ?';  countParams.push(category) }
+    if (location)  { countQuery += ' AND l.location LIKE ?'; countParams.push(`%${location}%`) }
+    if (search)    { countQuery += ' AND (l.title LIKE ? OR l.description LIKE ?)'; countParams.push(`%${search}%`, `%${search}%`) }
+    if (min_price) { countQuery += ' AND l.price >= ?'; countParams.push(parseFloat(min_price)) }
+    if (max_price) { countQuery += ' AND l.price <= ?'; countParams.push(parseFloat(max_price)) }
+    const countRow = await c.env.DB.prepare(countQuery).bind(...countParams).first<{ total: number }>()
+
+    return c.json({ listings: results, total: countRow?.total || results.length, offset, limit })
   } catch (err) {
     console.error('List listings error:', err)
     return c.json({ error: 'Erreur serveur' }, 500)
