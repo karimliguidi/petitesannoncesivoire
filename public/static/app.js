@@ -1,17 +1,33 @@
 // ============================================================
-//  PetitesAnnonces.fr — Frontend App
+//  PetitesAnnoncesIvoire.com — Frontend App
 // ============================================================
 
 const CATEGORIES = [
-  { name: 'Véhicules',    icon: 'fa-car',           color: 'blue' },
-  { name: 'Immobilier',   icon: 'fa-home',          color: 'green' },
-  { name: 'Électronique', icon: 'fa-mobile-alt',    color: 'purple' },
-  { name: 'Mode',         icon: 'fa-tshirt',        color: 'pink' },
-  { name: 'Maison',       icon: 'fa-couch',         color: 'yellow' },
-  { name: 'Loisirs',      icon: 'fa-futbol',        color: 'red' },
-  { name: 'Emploi',       icon: 'fa-briefcase',     color: 'indigo' },
-  { name: 'Services',     icon: 'fa-concierge-bell',color: 'teal' },
-  { name: 'Autres',       icon: 'fa-ellipsis-h',    color: 'gray' },
+  { name: 'Véhicules',    icon: 'fa-car',            color: 'blue',   emoji: '🚗' },
+  { name: 'Immobilier',   icon: 'fa-home',           color: 'green',  emoji: '🏠' },
+  { name: 'Électronique', icon: 'fa-mobile-alt',     color: 'purple', emoji: '📱' },
+  { name: 'Mode',         icon: 'fa-tshirt',         color: 'pink',   emoji: '👗' },
+  { name: 'Maison',       icon: 'fa-couch',          color: 'yellow', emoji: '🛋️' },
+  { name: 'Alimentation', icon: 'fa-drumstick-bite', color: 'orange', emoji: '🥘' },
+  { name: 'Loisirs',      icon: 'fa-futbol',         color: 'red',    emoji: '⚽' },
+  { name: 'Emploi',       icon: 'fa-briefcase',      color: 'indigo', emoji: '💼' },
+  { name: 'Services',     icon: 'fa-tools',          color: 'teal',   emoji: '🔧' },
+  { name: 'Agriculture',  icon: 'fa-seedling',       color: 'lime',   emoji: '🌿' },
+  { name: 'Autres',       icon: 'fa-ellipsis-h',     color: 'gray',   emoji: '📦' },
+]
+
+// Villes populaires de Côte d'Ivoire
+const CITIES = [
+  { name: 'Abidjan',       icon: '🏙️' },
+  { name: 'Bouaké',        icon: '🌆' },
+  { name: 'Yamoussoukro',  icon: '🕌' },
+  { name: 'San-Pédro',     icon: '⚓' },
+  { name: 'Korhogo',       icon: '🌾' },
+  { name: 'Daloa',         icon: '🌳' },
+  { name: 'Man',           icon: '⛰️' },
+  { name: 'Gagnoa',        icon: '🌿' },
+  { name: 'Abengourou',    icon: '🌺' },
+  { name: 'Grand-Bassam',  icon: '🏖️' },
 ]
 
 const COLOR_MAP = {
@@ -20,9 +36,11 @@ const COLOR_MAP = {
   purple: 'bg-purple-100 text-purple-600',
   pink:   'bg-pink-100 text-pink-600',
   yellow: 'bg-yellow-100 text-yellow-600',
+  orange: 'bg-orange-100 text-orange-600',
   red:    'bg-red-100 text-red-600',
   indigo: 'bg-indigo-100 text-indigo-600',
   teal:   'bg-teal-100 text-teal-600',
+  lime:   'bg-lime-100 text-lime-600',
   gray:   'bg-gray-100 text-gray-500',
 }
 
@@ -32,9 +50,11 @@ const BADGE_COLOR = {
   purple: 'bg-purple-50 text-purple-700 border-purple-200',
   pink:   'bg-pink-50 text-pink-700 border-pink-200',
   yellow: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+  orange: 'bg-orange-50 text-orange-700 border-orange-200',
   red:    'bg-red-50 text-red-700 border-red-200',
   indigo: 'bg-indigo-50 text-indigo-700 border-indigo-200',
   teal:   'bg-teal-50 text-teal-700 border-teal-200',
+  lime:   'bg-lime-50 text-lime-700 border-lime-200',
   gray:   'bg-gray-50 text-gray-500 border-gray-200',
 }
 
@@ -56,6 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch {}
   }
   buildCategoriesGrid()
+  buildCitiesGrid()
   loadListings()
 })
 
@@ -106,14 +127,29 @@ function buildCategoriesGrid() {
     const colors = COLOR_MAP[cat.color]
     return `
       <button onclick="filterByCategory('${cat.name}')"
-        class="flex flex-col items-center gap-2 p-4 bg-white rounded-xl border border-gray-200
+        class="flex flex-col items-center gap-1.5 p-3 bg-white rounded-xl border border-gray-200
                hover:border-primary-300 hover:shadow-sm transition cursor-pointer group">
-        <div class="w-10 h-10 ${colors} rounded-xl flex items-center justify-center text-lg group-hover:scale-110 transition">
+        <div class="w-9 h-9 ${colors} rounded-xl flex items-center justify-center text-base group-hover:scale-110 transition">
           <i class="fas ${cat.icon}"></i>
         </div>
-        <span class="text-xs font-medium text-gray-700">${cat.name}</span>
+        <span class="text-xs font-medium text-gray-700 leading-tight text-center">${cat.name}</span>
       </button>`
   }).join('')
+}
+
+// ── Villes populaires ────────────────────────────────────────
+function buildCitiesGrid() {
+  const grid = document.getElementById('cities-grid')
+  if (!grid) return
+  grid.innerHTML = CITIES.map(city => `
+    <button onclick="filterByCity('${city.name}')"
+      class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 rounded-full
+             text-sm text-gray-600 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50
+             transition cursor-pointer">
+      <span>${city.icon}</span>
+      <span class="font-medium">${city.name}</span>
+    </button>`
+  ).join('')
 }
 
 // ── Chargement des annonces ───────────────────────────────────
@@ -274,10 +310,17 @@ async function showListing(id) {
 // ── Filtres & Recherche ───────────────────────────────────────
 function filterByCategory(category) {
   activeFilter = category
-  document.getElementById('listings-title').textContent = `Annonces : ${category}`
+  document.getElementById('listings-title').textContent = `Catégorie : ${category}`
   document.getElementById('btn-reset-filter').classList.remove('hidden')
   loadListings('', category)
-  window.scrollTo({ top: 400, behavior: 'smooth' })
+  window.scrollTo({ top: 500, behavior: 'smooth' })
+}
+
+function filterByCity(city) {
+  document.getElementById('listings-title').textContent = `Annonces à ${city}`
+  document.getElementById('btn-reset-filter').classList.remove('hidden')
+  loadListings(city, activeFilter || '')
+  window.scrollTo({ top: 500, behavior: 'smooth' })
 }
 
 function resetFilter() {
@@ -627,7 +670,11 @@ async function archiveListing(id) {
 // ── Utilitaires ───────────────────────────────────────────────
 function formatPrice(p) {
   if (p === 0) return 'Gratuit'
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(p)
+  // FCFA — Franc CFA Afrique de l'Ouest
+  return new Intl.NumberFormat('fr-FR', {
+    style: 'decimal',
+    maximumFractionDigits: 0
+  }).format(p) + ' FCFA'
 }
 
 function escHtml(str) {
