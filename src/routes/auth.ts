@@ -86,7 +86,7 @@ authRoutes.post('/register', async (c) => {
       secret
     )
 
-    return c.json({ token, user: { id: userId, name: name.trim(), email: email.toLowerCase() } }, 201)
+    return c.json({ token, user: { id: userId, name: name.trim(), email: email.toLowerCase(), is_admin: false } }, 201)
   } catch (err: any) {
     console.error('Register error:', err)
     return c.json({ error: 'Erreur serveur lors de l\'inscription' }, 500)
@@ -103,8 +103,8 @@ authRoutes.post('/login', async (c) => {
     }
 
     const user = await c.env.DB.prepare(
-      'SELECT id, name, email, password_hash FROM users WHERE email = ?'
-    ).bind(email.toLowerCase()).first<{ id: number; name: string; email: string; password_hash: string }>()
+      'SELECT id, name, email, password_hash, is_admin FROM users WHERE email = ?'
+    ).bind(email.toLowerCase()).first<{ id: number; name: string; email: string; password_hash: string; is_admin: number }>()
 
     if (!user) {
       return c.json({ error: 'Email ou mot de passe incorrect' }, 401)
@@ -121,7 +121,7 @@ authRoutes.post('/login', async (c) => {
       secret
     )
 
-    return c.json({ token, user: { id: user.id, name: user.name, email: user.email } })
+    return c.json({ token, user: { id: user.id, name: user.name, email: user.email, is_admin: user.is_admin === 1 } })
   } catch (err: any) {
     console.error('Login error:', err)
     return c.json({ error: 'Erreur serveur lors de la connexion' }, 500)
