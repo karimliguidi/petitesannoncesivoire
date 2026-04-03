@@ -8,6 +8,7 @@ import { messagesRoutes } from './routes/messages'
 import { favoritesRoutes } from './routes/favorites'
 import { notificationsRoutes } from './routes/notifications'
 import { profileRoutes } from './routes/profile'
+import { reportsRoutes } from './routes/reports'
 
 export type Bindings = {
   DB: D1Database
@@ -26,6 +27,7 @@ app.route('/api/messages', messagesRoutes)
 app.route('/api/favorites', favoritesRoutes)
 app.route('/api/notifications', notificationsRoutes)
 app.route('/api/profile', profileRoutes)
+app.route('/api/reports', reportsRoutes)
 
 // Route principale → SPA
 app.get('*', (c) => {
@@ -39,6 +41,24 @@ app.get('*', (c) => {
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    .dark-mode { background-color: #0f172a !important; color: #e2e8f0; }
+    .dark-mode header { background-color: #1e293b !important; border-color: #334155 !important; }
+    .dark-mode .bg-white { background-color: #1e293b !important; }
+    .dark-mode .bg-gray-50 { background-color: #0f172a !important; }
+    .dark-mode .bg-gray-100 { background-color: #1e293b !important; }
+    .dark-mode .text-gray-800 { color: #e2e8f0 !important; }
+    .dark-mode .text-gray-700 { color: #cbd5e1 !important; }
+    .dark-mode .text-gray-600 { color: #94a3b8 !important; }
+    .dark-mode .text-gray-500 { color: #64748b !important; }
+    .dark-mode .border-gray-200 { border-color: #334155 !important; }
+    .dark-mode .border-gray-100 { border-color: #1e293b !important; }
+    .dark-mode .border-gray-300 { border-color: #475569 !important; }
+    .dark-mode input, .dark-mode textarea, .dark-mode select {
+      background-color: #1e293b !important; color: #e2e8f0 !important; border-color: #475569 !important;
+    }
+    .dark-mode footer { background-color: #1e293b !important; border-color: #334155 !important; }
+  </style>
   <script>
     tailwind.config = {
       theme: {
@@ -68,6 +88,9 @@ app.get('*', (c) => {
           <i class="fas fa-home"></i>
         </button>
         <div id="nav-guest" class="flex gap-1.5">
+          <button id="dark-mode-btn" onclick="toggleDarkMode()" class="text-gray-500 hover:text-gray-700 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 transition" title="Mode sombre">
+            <i class="fas fa-moon"></i>
+          </button>
           <button onclick="showPage('login')" class="text-gray-600 hover:text-primary-600 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-gray-100 transition">Connexion</button>
           <button onclick="showPage('register')" class="bg-primary-600 text-white text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-primary-700 transition shadow-sm">S'inscrire</button>
         </div>
@@ -75,7 +98,10 @@ app.get('*', (c) => {
           <button onclick="showPage('new-listing')" class="bg-accent-500 text-white text-sm font-semibold px-3 py-1.5 rounded-lg hover:bg-accent-600 transition shadow-sm">
             <i class="fas fa-plus mr-1"></i><span class="hidden sm:inline">Publier</span>
           </button>
-          <!-- Favoris -->
+          <!-- Mode sombre -->
+          <button id="dark-mode-btn" onclick="toggleDarkMode()" class="text-gray-500 hover:text-gray-700 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 transition" title="Mode sombre">
+            <i class="fas fa-moon"></i>
+          </button>
           <button onclick="showPage('favorites')" class="relative text-gray-600 hover:text-red-500 text-sm px-2.5 py-1.5 rounded-lg hover:bg-gray-100 transition" title="Mes favoris">
             <i class="fas fa-heart"></i>
           </button>
@@ -543,6 +569,7 @@ app.get('*', (c) => {
         <button onclick="adminTab('stats')" id="admin-tab-stats" class="admin-tab-btn active px-4 py-2 rounded-lg text-sm font-medium transition"><i class="fas fa-chart-bar mr-1"></i>Stats</button>
         <button onclick="adminTab('listings')" id="admin-tab-listings" class="admin-tab-btn px-4 py-2 rounded-lg text-sm font-medium transition"><i class="fas fa-list mr-1"></i>Annonces</button>
         <button onclick="adminTab('users')" id="admin-tab-users" class="admin-tab-btn px-4 py-2 rounded-lg text-sm font-medium transition"><i class="fas fa-users mr-1"></i>Utilisateurs</button>
+        <button onclick="adminTab('reports')" id="admin-tab-reports" class="admin-tab-btn px-4 py-2 rounded-lg text-sm font-medium transition"><i class="fas fa-flag mr-1 text-red-500"></i>Signalements</button>
       </div>
       <div id="admin-content"></div>
     </div>
@@ -574,6 +601,39 @@ app.get('*', (c) => {
     <div class="bg-gray-800 text-white px-5 py-3 rounded-xl shadow-lg text-sm flex items-center gap-3">
       <i id="toast-icon" class="fas fa-check-circle text-green-400"></i>
       <span id="toast-msg"></span>
+    </div>
+  </div>
+
+  <!-- MODAL SIGNALEMENT -->
+  <div id="modal-report" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-bold text-gray-800 text-lg"><i class="fas fa-flag text-red-500 mr-2"></i>Signaler l'annonce</h3>
+        <button onclick="closeReportModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Motif *</label>
+          <select id="report-reason" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 bg-white">
+            <option value="">Choisir un motif...</option>
+            <option value="arnaque">Arnaque / Fraude</option>
+            <option value="contenu_inapproprie">Contenu inapproprié</option>
+            <option value="doublon">Annonce en double</option>
+            <option value="prix_abusif">Prix abusif</option>
+            <option value="fausses_infos">Fausses informations</option>
+            <option value="autre">Autre</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Détails (facultatif)</label>
+          <textarea id="report-details" rows="3" placeholder="Décris le problème..." class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"></textarea>
+        </div>
+        <div id="report-error" class="hidden text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg"></div>
+        <div class="flex gap-3">
+          <button onclick="closeReportModal()" class="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-xl font-medium hover:bg-gray-50 transition text-sm">Annuler</button>
+          <button onclick="submitReport()" class="flex-1 bg-red-500 text-white py-2.5 rounded-xl font-semibold hover:bg-red-600 transition text-sm"><i class="fas fa-flag mr-2"></i>Signaler</button>
+        </div>
+      </div>
     </div>
   </div>
 

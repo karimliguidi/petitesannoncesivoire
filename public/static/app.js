@@ -62,6 +62,7 @@ let favoriteIds   = new Set()
 
 // ── Init ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  initDarkMode()
   const saved = localStorage.getItem('auth')
   if (saved) {
     try {
@@ -287,6 +288,14 @@ function listingCard(l) {
            onerror="this.parentElement.innerHTML='<i class=\\'fas ${icon} text-4xl text-gray-300\\'></i>'" />`
     : `<i class="fas ${icon} text-4xl text-gray-300 group-hover:text-gray-400 transition"></i>`
 
+  // Bouton WhatsApp si contact disponible
+  const waBtn = l.contact ? `
+    <button onclick="event.stopPropagation();openWhatsApp('${escHtml(l.contact)}','${escHtml(l.title)}')"
+      class="absolute bottom-2 right-2 bg-green-500 hover:bg-green-600 text-white rounded-full w-8 h-8 flex items-center justify-center shadow-md transition z-10"
+      title="Contacter sur WhatsApp">
+      <i class="fab fa-whatsapp text-base"></i>
+    </button>` : ''
+
   return `
   <div class="bg-white rounded-xl border border-gray-200 hover:border-primary-300 hover:shadow-md transition cursor-pointer overflow-hidden group relative"
        onclick="showListing(${l.id})">
@@ -299,6 +308,7 @@ function listingCard(l) {
           title="${isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}">
           <i class="fas fa-heart ${isFav ? 'text-red-500' : 'text-gray-300'}"></i>
         </button>` : ''}
+      ${waBtn}
     </div>
     <div class="p-3">
       <h3 class="font-semibold text-gray-800 text-sm truncate mb-1">${escHtml(l.title)}</h3>
@@ -334,9 +344,21 @@ async function showListing(id) {
     const isOwner = currentUser && l.user_id === currentUser.id
     const isFav   = favoriteIds.has(l.id)
 
+    // URL de partage
+    const shareUrl = encodeURIComponent(window.location.href)
+    const shareText = encodeURIComponent(`${l.title} — ${l.price ? formatPrice(l.price) : 'Prix à débattre'} sur PetitesAnnoncesIvoire.com`)
+
     const imageSection = l.image_data
       ? `<div class="bg-gray-100 overflow-hidden rounded-t-2xl"><img src="${l.image_data}" alt="${escHtml(l.title)}" class="w-full object-contain max-h-96" /></div>`
       : `<div class="h-48 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center rounded-t-2xl"><i class="fas ${icon} text-7xl text-gray-300"></i></div>`
+
+    // Boutons WhatsApp + partage
+    const whatsappBtn = l.contact ? `
+      <a href="https://wa.me/${formatPhoneForWA(l.contact)}?text=${encodeURIComponent('Bonjour, je suis intéressé par votre annonce : ' + l.title + ' sur PetitesAnnoncesIvoire.com')}"
+         target="_blank" rel="noopener"
+         class="flex-1 bg-green-500 hover:bg-green-600 text-white py-3 rounded-xl font-semibold transition text-sm text-center flex items-center justify-center gap-2">
+        <i class="fab fa-whatsapp text-lg"></i>WhatsApp
+      </a>` : ''
 
     content.innerHTML = `
       <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
@@ -347,7 +369,7 @@ async function showListing(id) {
               <span class="text-xs font-medium px-3 py-1 rounded-full border ${badge} mb-2 inline-block"><i class="fas ${icon} mr-1"></i>${l.category}</span>
               <h1 class="text-xl font-bold text-gray-800">${escHtml(l.title)}</h1>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               ${price}
               ${currentUser && !isOwner ? `
                 <button onclick="toggleFavorite(${l.id},this)" class="w-10 h-10 rounded-full border ${isFav ? 'border-red-300 bg-red-50' : 'border-gray-200'} flex items-center justify-center hover:bg-red-50 transition" title="Favoris">
@@ -369,20 +391,58 @@ async function showListing(id) {
             <div class="flex items-center gap-2 text-gray-400"><i class="fas fa-calendar w-5"></i>${date}</div>
           </div>
 
+          <!-- Boutons d'action principaux -->
           ${!isOwner && currentUser ? `
-            <button onclick="openMessageModal(${l.id},'${escHtml(l.title)}')"
-              class="w-full bg-primary-600 text-white py-3 rounded-xl font-semibold hover:bg-primary-700 transition mb-3">
-              <i class="fas fa-envelope mr-2"></i>Contacter le vendeur
-            </button>` : ''}
+            <div class="flex gap-2 mb-3 flex-wrap">
+              ${whatsappBtn}
+              <button onclick="openMessageModal(${l.id},'${escHtml(l.title)}')"
+                class="flex-1 bg-primary-600 text-white py-3 rounded-xl font-semibold hover:bg-primary-700 transition text-sm flex items-center justify-center gap-2">
+                <i class="fas fa-envelope"></i>Message
+              </button>
+            </div>` : ''}
           ${!currentUser ? `
-            <button onclick="showPage('login')" class="w-full bg-primary-600 text-white py-3 rounded-xl font-semibold hover:bg-primary-700 transition mb-3">
-              <i class="fas fa-sign-in-alt mr-2"></i>Connectez-vous pour contacter le vendeur
-            </button>` : ''}
+            <div class="flex gap-2 mb-3 flex-wrap">
+              ${l.contact ? `
+              <a href="https://wa.me/${formatPhoneForWA(l.contact)}?text=${encodeURIComponent('Bonjour, je suis intéressé par votre annonce : ' + l.title)}"
+                 target="_blank" rel="noopener"
+                 class="flex-1 bg-green-500 hover:bg-green-600 text-white py-3 rounded-xl font-semibold transition text-sm text-center flex items-center justify-center gap-2">
+                <i class="fab fa-whatsapp text-lg"></i>WhatsApp
+              </a>` : ''}
+              <button onclick="showPage('login')" class="flex-1 bg-primary-600 text-white py-3 rounded-xl font-semibold hover:bg-primary-700 transition text-sm flex items-center justify-center gap-2">
+                <i class="fas fa-sign-in-alt"></i>Connexion pour écrire
+              </button>
+            </div>` : ''}
 
+          <!-- Partage réseaux sociaux -->
+          <div class="flex items-center gap-2 py-3 border-t border-b border-gray-100 mb-3">
+            <span class="text-xs text-gray-400 font-medium mr-1"><i class="fas fa-share-alt mr-1"></i>Partager :</span>
+            <a href="https://wa.me/?text=${shareText}%20${shareUrl}" target="_blank" rel="noopener"
+               class="w-8 h-8 bg-green-500 hover:bg-green-600 text-white rounded-full flex items-center justify-center transition text-sm" title="WhatsApp">
+              <i class="fab fa-whatsapp"></i>
+            </a>
+            <a href="https://www.facebook.com/sharer/sharer.php?u=${shareUrl}" target="_blank" rel="noopener"
+               class="w-8 h-8 bg-blue-600 hover:bg-blue-700 text-white rounded-full flex items-center justify-center transition text-sm" title="Facebook">
+              <i class="fab fa-facebook-f"></i>
+            </a>
+            <a href="https://twitter.com/intent/tweet?text=${shareText}&url=${shareUrl}" target="_blank" rel="noopener"
+               class="w-8 h-8 bg-sky-500 hover:bg-sky-600 text-white rounded-full flex items-center justify-center transition text-sm" title="Twitter/X">
+              <i class="fab fa-twitter"></i>
+            </a>
+            <button onclick="copyLink()" class="w-8 h-8 bg-gray-200 hover:bg-gray-300 text-gray-600 rounded-full flex items-center justify-center transition text-sm" title="Copier le lien">
+              <i class="fas fa-link"></i>
+            </button>
+            ${currentUser && !isOwner ? `
+            <button onclick="openReportModal(${l.id})" class="ml-auto text-xs text-gray-400 hover:text-red-500 flex items-center gap-1 transition">
+              <i class="fas fa-flag"></i>Signaler
+            </button>` : ''}
+          </div>
+
+          <!-- Actions propriétaire -->
           ${isOwner ? `
-            <div class="flex gap-3 pt-4 border-t border-gray-100">
-              <button onclick="deleteListing(${l.id})" class="flex-1 bg-red-50 text-red-600 hover:bg-red-100 py-2 rounded-xl font-medium text-sm transition"><i class="fas fa-trash mr-2"></i>Supprimer</button>
+            <div class="flex gap-2 flex-wrap pt-2">
+              <button onclick="showEditListing(${l.id})" class="flex-1 bg-primary-50 text-primary-600 hover:bg-primary-100 py-2 rounded-xl font-medium text-sm transition"><i class="fas fa-edit mr-2"></i>Modifier</button>
               <button onclick="archiveListing(${l.id})" class="flex-1 bg-gray-100 text-gray-600 hover:bg-gray-200 py-2 rounded-xl font-medium text-sm transition"><i class="fas fa-archive mr-2"></i>Archiver</button>
+              <button onclick="deleteListing(${l.id})" class="flex-1 bg-red-50 text-red-600 hover:bg-red-100 py-2 rounded-xl font-medium text-sm transition"><i class="fas fa-trash mr-2"></i>Supprimer</button>
             </div>` : ''}
         </div>
       </div>`
@@ -903,14 +963,319 @@ async function archiveListing(id) {
   } catch { showToast('Erreur serveur','error') }
 }
 
-// ── Administration ─────────────────────────────────────────────
-function adminTab(tab) {
+// ── WhatsApp & Partage ────────────────────────────────────────
+function formatPhoneForWA(phone) {
+  // Nettoyer le numéro : garder uniquement les chiffres et le +
+  let p = String(phone).replace(/[\s\-().]/g, '')
+  if (p.startsWith('00')) p = '+' + p.slice(2)
+  if (!p.startsWith('+') && !p.startsWith('225')) p = '225' + p
+  return p.replace(/^\+/, '')
+}
+
+function openWhatsApp(contact, title) {
+  const phone = formatPhoneForWA(contact)
+  const msg = encodeURIComponent(`Bonjour, je suis intéressé par votre annonce "${title}" sur PetitesAnnoncesIvoire.com`)
+  window.open(`https://wa.me/${phone}?text=${msg}`, '_blank', 'noopener')
+}
+
+function copyLink() {
+  navigator.clipboard.writeText(window.location.href).then(() => {
+    showToast('Lien copié ! 🔗')
+  }).catch(() => {
+    showToast('Impossible de copier', 'error')
+  })
+}
+
+// ── Signalement ───────────────────────────────────────────────
+let currentReportListingId = null
+
+function openReportModal(listingId) {
+  if (!authToken) { showPage('login'); return }
+  currentReportListingId = listingId
+  document.getElementById('report-reason').value = ''
+  document.getElementById('report-details').value = ''
+  document.getElementById('report-error').classList.add('hidden')
+  document.getElementById('modal-report').classList.remove('hidden')
+}
+function closeReportModal() {
+  document.getElementById('modal-report').classList.add('hidden')
+}
+
+async function submitReport() {
+  const reason  = document.getElementById('report-reason').value
+  const details = document.getElementById('report-details').value.trim()
+  const errEl   = document.getElementById('report-error')
+  errEl.classList.add('hidden')
+  if (!reason) { errEl.textContent = 'Veuillez choisir un motif'; errEl.classList.remove('hidden'); return }
+  try {
+    const res = await fetch('/api/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+      body: JSON.stringify({ listing_id: currentReportListingId, reason, details })
+    })
+    const d = await res.json()
+    if (!res.ok) { errEl.textContent = d.error; errEl.classList.remove('hidden'); return }
+    closeReportModal()
+    showToast('Signalement envoyé, merci ! 🚩')
+  } catch { errEl.textContent = 'Erreur serveur'; errEl.classList.remove('hidden') }
+}
+
+// ── Modifier une annonce ──────────────────────────────────────
+async function showEditListing(id) {
+  const content = document.getElementById('listing-detail-content')
+  content.innerHTML = `<div class="text-center py-16 text-gray-400"><i class="fas fa-spinner fa-spin text-3xl"></i></div>`
+  try {
+    const res = await fetch(`/api/listings/${id}`)
+    const { listing: l } = await res.json()
+    content.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-sm p-8 max-w-2xl mx-auto">
+        <div class="flex items-center gap-3 mb-6">
+          <button onclick="showListing(${id})" class="text-gray-400 hover:text-gray-600"><i class="fas fa-arrow-left"></i></button>
+          <h2 class="text-xl font-bold text-gray-800">Modifier l'annonce</h2>
+        </div>
+        <form onsubmit="submitEditListing(event,${id})" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Titre *</label>
+            <input type="text" id="edit-title" required value="${escHtml(l.title)}" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Catégorie *</label>
+              <select id="edit-category" required class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white">
+                ${['Véhicules','Immobilier','Électronique','Mode','Maison','Alimentation','Loisirs','Emploi','Services','Agriculture','Autres'].map(cat =>
+                  `<option value="${cat}" ${l.category===cat?'selected':''}>${cat}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Prix (FCFA)</label>
+              <input type="number" id="edit-price" min="0" value="${l.price ?? ''}" placeholder="Ex: 50000" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+            <textarea id="edit-description" required rows="4" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none">${escHtml(l.description)}</textarea>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Ville / Quartier</label>
+              <input type="text" id="edit-location" value="${escHtml(l.location||'')}" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Contact</label>
+              <input type="text" id="edit-contact" value="${escHtml(l.contact||'')}" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+          </div>
+          <!-- Modifier la photo -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1"><i class="fas fa-camera mr-1 text-gray-400"></i>Modifier la photo</label>
+            ${l.image_data ? `
+              <div class="relative mb-2">
+                <img id="edit-img-preview" src="${l.image_data}" class="w-full max-h-48 object-contain rounded-xl border border-gray-200 bg-gray-50" />
+                <button type="button" onclick="removeEditImage()" class="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center shadow text-xs"><i class="fas fa-times"></i></button>
+              </div>` : `<div id="edit-img-preview" class="hidden"></div>`}
+            <div id="edit-upload-zone" onclick="document.getElementById('edit-image').click()"
+              ondragover="event.preventDefault();this.classList.add('border-primary-400','bg-primary-50')"
+              ondragleave="this.classList.remove('border-primary-400','bg-primary-50')"
+              ondrop="event.preventDefault();this.classList.remove('border-primary-400','bg-primary-50');const f=event.dataTransfer.files[0];if(f){const i=document.getElementById('edit-image');const d=new DataTransfer();d.items.add(f);i.files=d.files;handleEditImageSelect(i);}"
+              class="${l.image_data ? 'hidden' : ''} border-2 border-dashed border-gray-300 rounded-xl p-4 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50 transition">
+              <i class="fas fa-cloud-upload-alt text-2xl text-gray-300 mb-1"></i>
+              <p class="text-sm text-gray-400">Cliquer ou glisser pour changer la photo</p>
+            </div>
+            <input type="file" id="edit-image" accept="image/*" class="hidden" onchange="handleEditImageSelect(this)" />
+          </div>
+          <div id="edit-error" class="hidden text-sm text-red-600 bg-red-50 px-4 py-2 rounded-lg"></div>
+          <div class="flex gap-3 pt-2">
+            <button type="button" onclick="showListing(${id})" class="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-xl font-medium hover:bg-gray-50 transition text-sm">Annuler</button>
+            <button type="submit" class="flex-1 bg-primary-600 text-white py-2.5 rounded-xl font-semibold hover:bg-primary-700 transition text-sm"><i class="fas fa-save mr-2"></i>Enregistrer</button>
+          </div>
+        </form>
+      </div>`
+    // Stocker l'image existante
+    window._editImageData = l.image_data || null
+    window._editImageRemoved = false
+  } catch {
+    content.innerHTML = `<div class="text-center py-12 text-red-400">Erreur de chargement</div>`
+  }
+}
+
+function handleEditImageSelect(input) {
+  const file = input.files[0]
+  if (!file) return
+  if (!file.type.startsWith('image/')) { showToast('Veuillez sélectionner une image', 'error'); return }
+  if (file.size > 5*1024*1024) { showToast('Image trop grande. Maximum 5 Mo.', 'error'); return }
+  const reader = new FileReader()
+  reader.onload = e => {
+    const img = new Image()
+    img.onload = () => {
+      const MAX=1200; let w=img.width, h=img.height
+      if(w>MAX||h>MAX){if(w>h){h=Math.round(h*MAX/w);w=MAX}else{w=Math.round(w*MAX/h);h=MAX}}
+      const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h
+      canvas.getContext('2d').drawImage(img,0,0,w,h)
+      const compressed = canvas.toDataURL('image/jpeg', 0.82)
+      window._editImageData = compressed
+      window._editImageRemoved = false
+      const preview = document.getElementById('edit-img-preview')
+      const zone = document.getElementById('edit-upload-zone')
+      if (preview) { preview.src = compressed; preview.classList.remove('hidden') }
+      if (zone) zone.classList.add('hidden')
+    }
+    img.src = e.target.result
+  }
+  reader.readAsDataURL(file)
+}
+
+function removeEditImage() {
+  window._editImageData = null
+  window._editImageRemoved = true
+  const preview = document.getElementById('edit-img-preview')
+  const zone = document.getElementById('edit-upload-zone')
+  if (preview) { preview.src=''; preview.classList.add('hidden') }
+  if (zone) zone.classList.remove('hidden')
+}
+
+async function submitEditListing(e, id) {
+  e.preventDefault()
+  if (!authToken) { showPage('login'); return }
+  const errEl = document.getElementById('edit-error'); errEl.classList.add('hidden')
+  const title       = document.getElementById('edit-title').value.trim()
+  const category    = document.getElementById('edit-category').value
+  const price       = document.getElementById('edit-price').value
+  const description = document.getElementById('edit-description').value.trim()
+  const location    = document.getElementById('edit-location').value.trim()
+  const contact     = document.getElementById('edit-contact').value.trim()
+
+  // image_data : nouvelle image, null si supprimée, undefined si inchangée
+  let image_data = undefined
+  if (window._editImageRemoved) image_data = null
+  else if (window._editImageData && window._editImageData !== (await fetch(`/api/listings/${id}`).then(r=>r.json()).catch(()=>({listing:{}})).then(d=>d.listing?.image_data))) {
+    image_data = window._editImageData
+  }
+
+  const btn = e.target.querySelector('[type="submit"]'); btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin mr-2"></i>Enregistrement...'
+  try {
+    const body = { title, category, price: price ? parseFloat(price) : null, description, location, contact }
+    if (image_data !== undefined) body.image_data = image_data
+    const res = await fetch(`/api/listings/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+      body: JSON.stringify(body)
+    })
+    const d = await res.json()
+    if (!res.ok) { errEl.textContent = d.error; errEl.classList.remove('hidden'); return }
+    showToast('Annonce mise à jour ! ✅')
+    showListing(id)
+  } catch { errEl.textContent = 'Erreur serveur'; errEl.classList.remove('hidden') }
+  finally { btn.disabled=false; btn.innerHTML='<i class="fas fa-save mr-2"></i>Enregistrer' }
+}
+
+// ── Mode sombre ───────────────────────────────────────────────
+function initDarkMode() {
+  const saved = localStorage.getItem('darkMode')
+  if (saved === 'true') enableDarkMode(false)
+  updateDarkModeBtn()
+}
+
+function toggleDarkMode() {
+  const isDark = document.documentElement.classList.contains('dark')
+  if (isDark) disableDarkMode()
+  else enableDarkMode()
+}
+
+function enableDarkMode(save = true) {
+  document.documentElement.classList.add('dark')
+  document.body.classList.add('dark-mode')
+  if (save) localStorage.setItem('darkMode', 'true')
+  updateDarkModeBtn()
+}
+
+function disableDarkMode() {
+  document.documentElement.classList.remove('dark')
+  document.body.classList.remove('dark-mode')
+  localStorage.setItem('darkMode', 'false')
+  updateDarkModeBtn()
+}
+
+function updateDarkModeBtn() {
+  const btn = document.getElementById('dark-mode-btn')
+  if (!btn) return
+  const isDark = document.documentElement.classList.contains('dark')
+  btn.innerHTML = isDark
+    ? '<i class="fas fa-sun text-yellow-400"></i>'
+    : '<i class="fas fa-moon text-gray-500"></i>'
+  btn.title = isDark ? 'Mode clair' : 'Mode sombre'
+}
+
+// ── Administration ─────────────────────────────────────────────function adminTab(tab) {
   document.querySelectorAll('.admin-tab-btn').forEach(b => b.classList.remove('bg-white','shadow','text-primary-600'))
   const active = document.getElementById(`admin-tab-${tab}`)
   if (active) active.classList.add('bg-white','shadow','text-primary-600')
   if (tab==='stats')    loadAdminStats()
   if (tab==='listings') loadAdminListings()
   if (tab==='users')    loadAdminUsers()
+  if (tab==='reports')  loadAdminReports()
+}
+
+async function loadAdminReports() {
+  const content = document.getElementById('admin-content')
+  content.innerHTML = `<div class="text-center py-12 text-gray-400"><i class="fas fa-spinner fa-spin text-3xl"></i></div>`
+  try {
+    const res = await fetch('/api/reports/admin', { headers: { Authorization: `Bearer ${authToken}` } })
+    if (!res.ok) { content.innerHTML=`<div class="text-center py-12 text-red-400">Accès refusé</div>`; return }
+    const { reports } = await res.json()
+    if (!reports.length) {
+      content.innerHTML = `<div class="text-center py-12 text-gray-400"><i class="fas fa-check-circle text-4xl mb-4 text-green-400"></i><p class="font-medium">Aucun signalement en attente</p></div>`
+      return
+    }
+    const reasonLabels = { arnaque:'Arnaque/Fraude', contenu_inapproprie:'Contenu inapproprié', doublon:'Doublon', prix_abusif:'Prix abusif', fausses_infos:'Fausses infos', autre:'Autre' }
+    content.innerHTML = `
+      <div class="bg-white rounded-xl border overflow-hidden">
+        <div class="p-4 border-b border-gray-100 flex items-center justify-between">
+          <h3 class="font-bold text-gray-800">Signalements en attente (${reports.length})</h3>
+        </div>
+        <div class="divide-y divide-gray-100">
+          ${reports.map(r=>`
+            <div class="flex items-start gap-3 p-4 hover:bg-gray-50" id="report-row-${r.id}">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                  <span class="text-sm font-semibold text-gray-800 truncate">${escHtml(r.listing_title)}</span>
+                  <span class="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">${r.total_reports} signalement(s)</span>
+                  <span class="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">${reasonLabels[r.reason]||r.reason}</span>
+                </div>
+                ${r.details ? `<p class="text-xs text-gray-500 mb-1">${escHtml(r.details)}</p>` : ''}
+                <p class="text-xs text-gray-400">Signalé par ${escHtml(r.reporter_name)} · ${timeAgo(r.created_at)}</p>
+              </div>
+              <div class="flex gap-1.5 shrink-0">
+                <button onclick="adminResolveReport(${r.id})" class="text-xs text-green-600 hover:text-green-700 px-2.5 py-1.5 rounded-lg hover:bg-green-50 transition" title="Ignorer / Résoudre">
+                  <i class="fas fa-check"></i>
+                </button>
+                <button onclick="adminDeleteReportedListing(${r.listing_id},${r.id})" class="text-xs text-red-500 hover:text-red-700 px-2.5 py-1.5 rounded-lg hover:bg-red-50 transition" title="Supprimer l'annonce">
+                  <i class="fas fa-trash"></i>
+                </button>
+                <button onclick="showListing(${r.listing_id})" class="text-xs text-primary-600 hover:text-primary-700 px-2.5 py-1.5 rounded-lg hover:bg-primary-50 transition" title="Voir l'annonce">
+                  <i class="fas fa-eye"></i>
+                </button>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>`
+  } catch { content.innerHTML=`<div class="text-center py-12 text-red-400">Erreur</div>` }
+}
+
+async function adminResolveReport(id) {
+  try {
+    await fetch(`/api/reports/${id}/resolve`, { method:'PUT', headers:{ Authorization:`Bearer ${authToken}` } })
+    document.getElementById(`report-row-${id}`)?.remove()
+    showToast('Signalement résolu ✓')
+  } catch { showToast('Erreur','error') }
+}
+
+async function adminDeleteReportedListing(listingId, reportId) {
+  if (!confirm('Supprimer cette annonce signalée ?')) return
+  try {
+    const res = await fetch(`/api/reports/${listingId}/delete-listing`, { method:'DELETE', headers:{ Authorization:`Bearer ${authToken}` } })
+    if (res.ok) { showToast('Annonce supprimée'); loadAdminReports() }
+    else showToast('Erreur','error')
+  } catch { showToast('Erreur','error') }
 }
 
 async function loadAdminStats() {

@@ -183,6 +183,45 @@ listingsRoutes.delete('/:id', authMiddleware, async (c) => {
   }
 })
 
+// PUT /api/listings/:id — modifier son annonce (authentifié)
+listingsRoutes.put('/:id', authMiddleware, async (c) => {
+  try {
+    const userId = c.get('userId')
+    const id = parseInt(c.req.param('id'))
+    const { title, description, category, price, location, contact, image_data } = await c.req.json()
+
+    if (!title || !description || !category) {
+      return c.json({ error: 'Titre, description et catégorie sont obligatoires' }, 400)
+    }
+    if (image_data && image_data.length > 550000) {
+      return c.json({ error: 'Image trop grande (max 400 Ko)' }, 400)
+    }
+
+    const listing = await c.env.DB.prepare(
+      'SELECT id FROM listings WHERE id = ? AND user_id = ?'
+    ).bind(id, userId).first()
+    if (!listing) return c.json({ error: 'Annonce introuvable ou non autorisé' }, 404)
+
+    // Si image_data est null on garde l'ancienne, si c'est une string vide on supprime
+    if (image_data === undefined) {
+      await c.env.DB.prepare(`
+        UPDATE listings SET title=?, description=?, category=?, price=?, location=?, contact=? WHERE id=?
+      `).bind(title.trim(), description.trim(), category, price ? parseFloat(price) : null,
+              location?.trim() || null, contact?.trim() || null, id).run()
+    } else {
+      await c.env.DB.prepare(`
+        UPDATE listings SET title=?, description=?, category=?, price=?, location=?, contact=?, image_data=? WHERE id=?
+      `).bind(title.trim(), description.trim(), category, price ? parseFloat(price) : null,
+              location?.trim() || null, contact?.trim() || null, image_data || null, id).run()
+    }
+
+    return c.json({ message: 'Annonce mise à jour avec succès' })
+  } catch (err) {
+    console.error('Update listing error:', err)
+    return c.json({ error: 'Erreur serveur' }, 500)
+  }
+})
+
 // PUT /api/listings/:id/archive — archiver son annonce (authentifié)
 listingsRoutes.put('/:id/archive', authMiddleware, async (c) => {
   try {
