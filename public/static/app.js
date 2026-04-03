@@ -82,11 +82,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const menu = document.getElementById('profile-menu')
     const btn  = e.target.closest('[onclick="toggleProfileMenu()"]')
     if (!btn && menu && !menu.contains(e.target)) menu.classList.add('hidden')
-
-    // Fermer le dropdown de recherche au clic extérieur
-    const dd       = document.getElementById('search-dropdown')
-    const searchEl = document.getElementById('search-input')
-    if (dd && !dd.contains(e.target) && e.target !== searchEl) hideSearchDropdown()
   })
 })
 
@@ -1129,23 +1124,92 @@ async function showPublicProfile(userId) {
   const content = document.getElementById('public-profile-content')
   content.innerHTML = `<div class="text-center py-12 text-gray-400"><i class="fas fa-spinner fa-spin text-3xl"></i></div>`
   try {
-    const res = await fetch(`/api/profile/${userId}`)
-    const { user, listings } = await res.json()
+    const [profileRes, statsRes] = await Promise.all([
+      fetch(`/api/profile/${userId}`),
+      fetch(`/api/followers/${userId}/stats`)
+    ])
+    const { user, listings } = await profileRes.json()
+    const stats = statsRes.ok ? await statsRes.json() : { followers_count: 0, following_count: 0 }
+
+    // Vérifier si je suis déjà ce vendeur
+    let isFollowing = false
+    if (authToken && currentUser && currentUser.id !== userId) {
+      try {
+        const idsRes = await fetch('/api/followers/ids', { headers: { Authorization: `Bearer ${authToken}` } })
+        const { ids } = await idsRes.json()
+        isFollowing = ids.includes(userId)
+      } catch {}
+    }
+
+    const isOwnProfile = currentUser && currentUser.id === userId
+
     content.innerHTML = `
-      <div class="bg-white rounded-2xl shadow-sm p-6 mb-6 flex items-center gap-5">
-        <div class="w-16 h-16 rounded-full bg-primary-100 flex items-center justify-center overflow-hidden shrink-0">
-          ${user.avatar ? `<img src="${user.avatar}" class="w-full h-full object-cover" />` : `<i class="fas fa-user text-primary-400 text-2xl"></i>`}
-        </div>
-        <div>
-          <h2 class="text-xl font-bold text-gray-800">${escHtml(user.name)}</h2>
-          ${user.city ? `<p class="text-sm text-gray-500"><i class="fas fa-map-marker-alt mr-1 text-primary-400"></i>${escHtml(user.city)}</p>` : ''}
-          ${user.bio  ? `<p class="text-sm text-gray-600 mt-1">${escHtml(user.bio)}</p>` : ''}
-          <p class="text-xs text-gray-300 mt-1">Membre depuis ${new Date(user.created_at).toLocaleDateString('fr-FR', {month:'long',year:'numeric'})}</p>
+      <div class="bg-white rounded-2xl shadow-sm p-6 mb-6">
+        <div class="flex items-start gap-5 flex-wrap">
+          <div class="w-16 h-16 rounded-full bg-primary-100 flex items-center justify-center overflow-hidden shrink-0">
+            ${user.avatar ? `<img src="${user.avatar}" class="w-full h-full object-cover" />` : `<i class="fas fa-user text-primary-400 text-2xl"></i>`}
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-3 flex-wrap mb-1">
+              <h2 class="text-xl font-bold text-gray-800">${escHtml(user.name)}</h2>
+            </div>
+            ${user.city ? `<p class="text-sm text-gray-500 mb-1"><i class="fas fa-map-marker-alt mr-1 text-primary-400"></i>${escHtml(user.city)}</p>` : ''}
+            ${user.bio  ? `<p class="text-sm text-gray-600 mb-2">${escHtml(user.bio)}</p>` : ''}
+            <!-- Stats abonnés -->
+            <div class="flex items-center gap-4 text-sm text-gray-500 mb-3">
+              <span><strong class="text-gray-800">${stats.followers_count}</strong> abonné${stats.followers_count > 1 ? 's' : ''}</span>
+              <span><strong class="text-gray-800">${stats.following_count}</strong> abonnement${stats.following_count > 1 ? 's' : ''}</span>
+              <span><strong class="text-gray-800">${listings.length}</strong> annonce${listings.length > 1 ? 's' : ''}</span>
+            </div>
+            <p class="text-xs text-gray-300">Membre depuis ${new Date(user.created_at).toLocaleDateString('fr-FR', {month:'long',year:'numeric'})}</p>
+          </div>
+          <!-- Bouton Suivre -->
+          ${currentUser && !isOwnProfile ? `
+            <button id="follow-btn-${userId}" onclick="toggleFollow(${userId}, this)"
+              class="flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm transition shrink-0 ${
+                isFollowing
+                  ? 'bg-gray-100 text-gray-600 hover:bg-red-50 hover:text-red-500 border border-gray-200'
+                  : 'bg-primary-600 text-white hover:bg-primary-700'
+              }">
+              <i class="fas ${isFollowing ? 'fa-user-check' : 'fa-user-plus'}"></i>
+              <span>${isFollowing ? 'Abonné' : 'Suivre'}</span>
+            </button>` : ''}
         </div>
       </div>
       <h3 class="font-bold text-gray-800 mb-4">Annonces actives (${listings.length})</h3>
-      ${listings.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">${listings.map(l => listingCard(l)).join('')}</div>` : `<p class="text-gray-400 text-sm">Aucune annonce active</p>`}`
-  } catch { content.innerHTML = `<div class="text-center py-12 text-red-400">Profil introuvable</div>` }
+      ${listings.length
+        ? `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">${listings.map(l => listingCard(l)).join('')}</div>`
+        : `<p class="text-gray-400 text-sm bg-white rounded-xl border p-8 text-center"><i class="fas fa-box-open text-3xl mb-3 block opacity-30"></i>Aucune annonce active</p>`
+      }`
+  } catch {
+    content.innerHTML = `<div class="text-center py-12 text-red-400">Profil introuvable</div>`
+  }
+}
+
+async function toggleFollow(userId, btn) {
+  if (!authToken) { showPage('login'); return }
+  try {
+    const res = await fetch(`/api/followers/${userId}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${authToken}` }
+    })
+    const d = await res.json()
+    if (res.ok) {
+      const icon = btn.querySelector('i')
+      const label = btn.querySelector('span')
+      if (d.following) {
+        btn.className = btn.className.replace('bg-primary-600 text-white hover:bg-primary-700', 'bg-gray-100 text-gray-600 hover:bg-red-50 hover:text-red-500 border border-gray-200')
+        icon.className = 'fas fa-user-check'
+        label.textContent = 'Abonné'
+        showToast('Abonnement activé ! 🔔')
+      } else {
+        btn.className = btn.className.replace('bg-gray-100 text-gray-600 hover:bg-red-50 hover:text-red-500 border border-gray-200', 'bg-primary-600 text-white hover:bg-primary-700')
+        icon.className = 'fas fa-user-plus'
+        label.textContent = 'Suivre'
+        showToast('Abonnement annulé')
+      }
+    }
+  } catch { showToast('Erreur', 'error') }
 }
 
 // ── Tableau de bord ────────────────────────────────────────────
