@@ -243,6 +243,34 @@ listingsRoutes.post('/', authMiddleware, async (c) => {
       }
     }
 
+    // Notifier tous les abonnés du vendeur
+    try {
+      const { results: followers } = await c.env.DB.prepare(
+        'SELECT follower_id FROM followers WHERE followed_id = ?'
+      ).bind(userId).all()
+
+      if (followers.length > 0) {
+        const seller = await c.env.DB.prepare(
+          'SELECT name FROM users WHERE id = ?'
+        ).bind(userId).first<{ name: string }>()
+
+        for (const f of followers) {
+          await c.env.DB.prepare(`
+            INSERT INTO notifications (user_id, type, title, body, link)
+            VALUES (?, 'new_listing', ?, ?, ?)
+          `).bind(
+            (f as any).follower_id,
+            `🆕 ${seller?.name || 'Un vendeur'} a publié une annonce`,
+            title,
+            `/listing/${listingId}`
+          ).run()
+        }
+      }
+    } catch (notifErr) {
+      // Ne pas bloquer la publication si les notifs échouent
+      console.error('Notification followers error:', notifErr)
+    }
+
     return c.json({ id: listingId, message: 'Annonce publiée avec succès' }, 201)
   } catch (err) {
     console.error('Create listing error:', err)
