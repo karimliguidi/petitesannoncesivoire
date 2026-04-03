@@ -591,15 +591,208 @@ function resetFilter() {
   document.getElementById('btn-reset-filter').classList.add('hidden')
   loadListings()
 }
+// ── Recherche avancée avec auto-complétion & historique ───────
+const SEARCH_HISTORY_KEY = 'pai_search_history'
+const MAX_HISTORY        = 8
+let searchDebounceTimer  = null
+let searchSelectedIndex  = -1
+let searchAllSuggestions = []
+
+function getSearchHistory() {
+  try { return JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || '[]') } catch { return [] }
+}
+
+function saveToSearchHistory(query) {
+  if (!query || query.length < 2) return
+  let history = getSearchHistory().filter(h => h.toLowerCase() !== query.toLowerCase())
+  history.unshift(query)
+  if (history.length > MAX_HISTORY) history = history.slice(0, MAX_HISTORY)
+  localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(history))
+}
+
+function clearSearchHistory() {
+  localStorage.removeItem(SEARCH_HISTORY_KEY)
+  hideSearchDropdown()
+  showToast('Historique effacé')
+}
+
+function clearSearch() {
+  const input = document.getElementById('search-input')
+  input.value = ''
+  document.getElementById('search-clear-btn').classList.add('hidden')
+  hideSearchDropdown()
+  input.focus()
+}
+
+function hideSearchDropdown() {
+  const dd = document.getElementById('search-dropdown')
+  if (dd) dd.classList.add('hidden')
+  searchSelectedIndex = -1
+}
+
+function onSearchFocus() {
+  const input = document.getElementById('search-input')
+  renderSearchDropdown(input.value.trim())
+}
+
+function onSearchInput(val) {
+  const clearBtn = document.getElementById('search-clear-btn')
+  if (clearBtn) clearBtn.classList.toggle('hidden', !val)
+
+  clearTimeout(searchDebounceTimer)
+  if (!val.trim()) {
+    renderSearchDropdown('')
+    return
+  }
+  searchDebounceTimer = setTimeout(() => {
+    fetchSearchSuggestions(val.trim())
+  }, 220)
+}
+
+async function fetchSearchSuggestions(query) {
+  try {
+    const res = await fetch(`/api/listings?search=${encodeURIComponent(query)}&limit=6&offset=0`)
+    const data = await res.json()
+    const titles = (data.listings || []).map(l => l.title)
+    renderSearchDropdown(query, titles)
+  } catch {
+    renderSearchDropdown(query, [])
+  }
+}
+
+function renderSearchDropdown(query, suggestions = []) {
+  const dd       = document.getElementById('search-dropdown')
+  const histSec  = document.getElementById('search-history-section')
+  const histList = document.getElementById('search-history-list')
+  const suggSec  = document.getElementById('search-suggestions-section')
+  const suggList = document.getElementById('search-suggestions-list')
+  const quickSec = document.getElementById('search-quick-section')
+  const quickList= document.getElementById('search-quick-list')
+  if (!dd) return
+
+  searchAllSuggestions = []
+  searchSelectedIndex  = -1
+
+  // ── Historique ──────────────────────────────────────────────
+  const history = getSearchHistory().filter(h =>
+    !query || h.toLowerCase().includes(query.toLowerCase())
+  ).slice(0, 5)
+
+  if (history.length && !query) {
+    histSec.classList.remove('hidden')
+    histList.innerHTML = history.map((h, i) => `
+      <button onclick="selectSearchSuggestion('${escHtml(h)}')"
+        class="search-dd-item w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 flex items-center gap-3 transition"
+        data-idx="${searchAllSuggestions.length + i}">
+        <i class="fas fa-history text-gray-300 w-4 shrink-0"></i>
+        <span class="truncate">${escHtml(h)}</span>
+        <i class="fas fa-arrow-up-left text-gray-200 ml-auto shrink-0 text-xs"></i>
+      </button>`).join('')
+    searchAllSuggestions.push(...history)
+  } else {
+    histSec.classList.add('hidden')
+  }
+
+  // ── Suggestions dynamiques ───────────────────────────────────
+  if (suggestions.length) {
+    suggSec.classList.remove('hidden')
+    suggList.innerHTML = suggestions.map((s, i) => `
+      <button onclick="selectSearchSuggestion('${escHtml(s)}')"
+        class="search-dd-item w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 flex items-center gap-3 transition"
+        data-idx="${searchAllSuggestions.length + i}">
+        <i class="fas fa-search text-primary-300 w-4 shrink-0"></i>
+        <span class="truncate">${highlightMatch(s, query)}</span>
+      </button>`).join('')
+    searchAllSuggestions.push(...suggestions)
+  } else {
+    suggSec.classList.add('hidden')
+  }
+
+  // ── Accès rapide (catégories + villes si pas de query) ────────
+  if (!query) {
+    quickSec.classList.remove('hidden')
+    const quickItems = [
+      ...CATEGORIES.slice(0, 5).map(c => ({ label: `${c.emoji} ${c.name}`, type: 'cat', val: c.name })),
+      ...CITIES.slice(0, 4).map(c => ({ label: `${c.icon} ${c.name}`, type: 'city', val: c.name })),
+    ]
+    quickList.innerHTML = `<div class="flex flex-wrap gap-1.5 px-4 pb-3">` +
+      quickItems.map(item => `
+        <button onclick="${item.type === 'cat' ? `filterByCategory('${escHtml(item.val)}')` : `filterByCity('${escHtml(item.val)}')`};hideSearchDropdown()"
+          class="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-50 hover:bg-primary-50 border border-gray-200 hover:border-primary-300 rounded-full text-xs text-gray-600 hover:text-primary-600 transition font-medium">
+          ${escHtml(item.label)}
+        </button>`).join('') + `</div>`
+  } else {
+    quickSec.classList.add('hidden')
+  }
+
+  const hasContent = history.length || suggestions.length || !query
+  dd.classList.toggle('hidden', !hasContent)
+}
+
+function highlightMatch(text, query) {
+  if (!query) return escHtml(text)
+  const idx = text.toLowerCase().indexOf(query.toLowerCase())
+  if (idx === -1) return escHtml(text)
+  return escHtml(text.slice(0, idx)) +
+    `<strong class="text-primary-600">${escHtml(text.slice(idx, idx + query.length))}</strong>` +
+    escHtml(text.slice(idx + query.length))
+}
+
+function selectSearchSuggestion(val) {
+  const input = document.getElementById('search-input')
+  if (input) input.value = val
+  const clearBtn = document.getElementById('search-clear-btn')
+  if (clearBtn) clearBtn.classList.remove('hidden')
+  hideSearchDropdown()
+  searchListings()
+}
+
+function onSearchKeydown(e) {
+  const items = document.querySelectorAll('.search-dd-item')
+  if (!items.length) {
+    if (e.key === 'Enter') searchListings()
+    return
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    searchSelectedIndex = Math.min(searchSelectedIndex + 1, items.length - 1)
+    updateSearchSelection(items)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    searchSelectedIndex = Math.max(searchSelectedIndex - 1, -1)
+    updateSearchSelection(items)
+  } else if (e.key === 'Enter') {
+    if (searchSelectedIndex >= 0 && searchAllSuggestions[searchSelectedIndex]) {
+      selectSearchSuggestion(searchAllSuggestions[searchSelectedIndex])
+    } else {
+      searchListings()
+    }
+  } else if (e.key === 'Escape') {
+    hideSearchDropdown()
+  }
+}
+
+function updateSearchSelection(items) {
+  items.forEach((item, i) => {
+    item.classList.toggle('bg-primary-50', i === searchSelectedIndex)
+    item.classList.toggle('text-primary-600', i === searchSelectedIndex)
+  })
+  if (searchSelectedIndex >= 0 && searchAllSuggestions[searchSelectedIndex]) {
+    const input = document.getElementById('search-input')
+    if (input) input.value = searchAllSuggestions[searchSelectedIndex]
+  }
+}
+
 function searchListings() {
   const q = document.getElementById('search-input').value.trim()
+  hideSearchDropdown()
   if (!q) return
+  saveToSearchHistory(q)
   document.getElementById('listings-title').textContent = `Résultats pour "${q}"`
   document.getElementById('btn-reset-filter').classList.remove('hidden')
   loadListings(q, activeFilter || '')
   window.scrollTo({ top: 600, behavior: 'smooth' })
 }
-document.addEventListener('keydown', e => { if (e.key === 'Enter' && document.activeElement.id === 'search-input') searchListings() })
 
 // ── Auth ──────────────────────────────────────────────────────
 async function handleRegister(e) {
@@ -1600,3 +1793,4 @@ function escHtml(str) {
   if (!str) return ''
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
 }
+
