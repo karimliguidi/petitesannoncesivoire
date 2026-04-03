@@ -1660,7 +1660,7 @@ async function loadAdminStats() {
   try {
     const res = await fetch('/api/profile/admin/stats', { headers:{Authorization:`Bearer ${authToken}`} })
     if (!res.ok) { content.innerHTML=`<div class="text-center py-12 text-red-400">Accès refusé</div>`; return }
-    const { stats, top_categories, latest_users, listings_by_day, users_by_day, top_listings } = await res.json()
+    const raw = await res.json(); const stats = raw.stats || {}; const top_categories = raw.top_categories || []; const latest_users = raw.latest_users || []; const listings_by_day = raw.listings_by_day || []; const users_by_day = raw.users_by_day || []; const top_listings = Array.isArray(raw.top_listings) ? raw.top_listings.filter(l => l && l.id) : []
 
     // Préparer les données pour les graphiques (30 derniers jours)
     const last30 = []
