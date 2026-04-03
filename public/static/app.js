@@ -50,7 +50,7 @@ const BADGE_COLOR = {
 let currentUser   = null
 let authToken     = null
 let activeFilter  = null
-let pendingImageData = null
+let pendingImages = []   // tableau de data URLs (max 5)
 let pendingAvatarData = null
 let currentPage   = 0
 const PAGE_SIZE   = 20
@@ -288,6 +288,11 @@ function listingCard(l) {
            onerror="this.parentElement.innerHTML='<i class=\\'fas ${icon} text-4xl text-gray-300\\'></i>'" />`
     : `<i class="fas ${icon} text-4xl text-gray-300 group-hover:text-gray-400 transition"></i>`
 
+  // Badge multi-photos
+  const photosBadge = (l.extra_images_count > 0)
+    ? `<span class="absolute bottom-2 left-2 bg-black/50 text-white text-xs px-1.5 py-0.5 rounded-lg backdrop-blur-sm flex items-center gap-1"><i class="fas fa-images text-xs"></i>${parseInt(l.extra_images_count)+1}</span>`
+    : ''
+
   // Bouton WhatsApp si contact disponible
   const waBtn = l.contact ? `
     <button onclick="event.stopPropagation();openWhatsApp('${escHtml(l.contact)}','${escHtml(l.title)}')"
@@ -302,6 +307,7 @@ function listingCard(l) {
     <div class="h-40 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center relative overflow-hidden">
       ${thumbnail}
       <span class="absolute top-2 left-2 text-xs font-medium px-2 py-0.5 rounded-full border ${badge} bg-white/90 backdrop-blur-sm">${l.category}</span>
+      ${photosBadge}
       ${currentUser ? `
         <button onclick="event.stopPropagation();toggleFavorite(${l.id},this)"
           class="absolute top-2 right-2 w-7 h-7 rounded-full bg-white/90 flex items-center justify-center shadow hover:bg-white transition"
@@ -348,9 +354,48 @@ async function showListing(id) {
     const shareUrl = encodeURIComponent(window.location.href)
     const shareText = encodeURIComponent(`${l.title} — ${l.price ? formatPrice(l.price) : 'Prix à débattre'} sur PetitesAnnoncesIvoire.com`)
 
-    const imageSection = l.image_data
-      ? `<div class="bg-gray-100 overflow-hidden rounded-t-2xl"><img src="${l.image_data}" alt="${escHtml(l.title)}" class="w-full object-contain max-h-96" /></div>`
-      : `<div class="h-48 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center rounded-t-2xl"><i class="fas ${icon} text-7xl text-gray-300"></i></div>`
+    // ── Galerie swipeable ──────────────────────────────────────
+    let imageSection = ''
+    const allImages = l.images || (l.image_data ? [{ id: 'main', data: l.image_data }] : [])
+    if (allImages.length === 0) {
+      imageSection = `<div class="h-48 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center rounded-t-2xl"><i class="fas ${icon} text-7xl text-gray-300"></i></div>`
+    } else if (allImages.length === 1) {
+      imageSection = `<div class="bg-gray-100 overflow-hidden rounded-t-2xl"><img src="${allImages[0].data}" alt="${escHtml(l.title)}" class="w-full object-contain max-h-96" /></div>`
+    } else {
+      // Galerie avec slider
+      const slides = allImages.map((img, i) =>
+        `<div class="gallery-slide flex-shrink-0 w-full" style="display:${i===0?'flex':'none'};align-items:center;justify-content:center;background:#f3f4f6;min-height:260px;">
+          <img src="${img.data}" alt="Photo ${i+1}" class="w-full object-contain max-h-96 select-none" draggable="false" />
+        </div>`
+      ).join('')
+      const dots = allImages.map((_, i) =>
+        `<button onclick="galleryGoto(${i})" class="gallery-dot w-2 h-2 rounded-full transition ${i===0?'bg-white scale-125':'bg-white/50'}" data-idx="${i}"></button>`
+      ).join('')
+      imageSection = `
+        <div id="listing-gallery" class="relative bg-gray-100 rounded-t-2xl overflow-hidden select-none"
+          data-idx="0" data-total="${allImages.length}"
+          ontouchstart="window._gts=event.touches[0].clientX" 
+          ontouchend="if(window._gts!==undefined){const dx=event.changedTouches[0].clientX-window._gts;if(Math.abs(dx)>40){dx<0?galleryNext():galleryPrev()}}">
+          <div id="gallery-track" class="flex">
+            ${slides}
+          </div>
+          <!-- Flèches -->
+          <button onclick="galleryPrev()" class="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 bg-black/30 hover:bg-black/50 text-white rounded-full flex items-center justify-center shadow transition z-10 backdrop-blur-sm">
+            <i class="fas fa-chevron-left"></i>
+          </button>
+          <button onclick="galleryNext()" class="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 bg-black/30 hover:bg-black/50 text-white rounded-full flex items-center justify-center shadow transition z-10 backdrop-blur-sm">
+            <i class="fas fa-chevron-right"></i>
+          </button>
+          <!-- Compteur -->
+          <div class="absolute top-3 right-3 bg-black/40 text-white text-xs px-2 py-0.5 rounded-full backdrop-blur-sm font-medium">
+            <span id="gallery-counter">1</span>/${allImages.length}
+          </div>
+          <!-- Dots -->
+          <div class="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+            ${dots}
+          </div>
+        </div>`
+    }
 
     // Boutons WhatsApp + partage
     const whatsappBtn = l.contact ? `
@@ -495,6 +540,35 @@ async function showListing(id) {
   } catch {
     content.innerHTML = `<div class="text-center py-16 text-red-400"><i class="fas fa-exclamation-triangle text-4xl mb-4"></i><p>Annonce introuvable</p></div>`
   }
+}
+
+// ── Galerie swipeable ─────────────────────────────────────────
+function galleryGoto(idx) {
+  const g = document.getElementById('listing-gallery')
+  if (!g) return
+  const total = parseInt(g.dataset.total)
+  idx = (idx + total) % total
+  g.dataset.idx = idx
+  const slides = g.querySelectorAll('.gallery-slide')
+  slides.forEach((s, i) => s.style.display = i === idx ? 'flex' : 'none')
+  const dots = g.querySelectorAll('.gallery-dot')
+  dots.forEach((d, i) => {
+    d.classList.toggle('bg-white', i === idx)
+    d.classList.toggle('scale-125', i === idx)
+    d.classList.toggle('bg-white/50', i !== idx)
+  })
+  const counter = document.getElementById('gallery-counter')
+  if (counter) counter.textContent = idx + 1
+}
+function galleryNext() {
+  const g = document.getElementById('listing-gallery')
+  if (!g) return
+  galleryGoto(parseInt(g.dataset.idx) + 1)
+}
+function galleryPrev() {
+  const g = document.getElementById('listing-gallery')
+  if (!g) return
+  galleryGoto(parseInt(g.dataset.idx) - 1)
 }
 
 // ── Filtres rapides ──────────────────────────────────────────
@@ -925,53 +999,92 @@ async function loadDashboard() {
 }
 
 // ── Nouvelle annonce ───────────────────────────────────────────
+// ── Gestion multi-images (nouvelle annonce) ──────────────────
 function resetNewListingForm() {
-  pendingImageData = null
-  const preview = document.getElementById('img-preview')
-  const zone    = document.getElementById('img-upload-zone')
-  const btn     = document.getElementById('img-remove-btn')
-  if (preview) { preview.src=''; preview.classList.add('hidden') }
-  if (zone)    zone.classList.remove('hidden')
-  if (btn)     btn.classList.add('hidden')
-  const input  = document.getElementById('nl-image')
-  if (input)   input.value = ''
+  pendingImages = []
+  renderPendingImages()
+  const zone = document.getElementById('img-upload-zone')
+  if (zone) zone.classList.remove('hidden')
+  const input = document.getElementById('nl-image')
+  if (input) input.value = ''
   const infoEl = document.getElementById('img-info')
-  if (infoEl)  infoEl.textContent = ''
+  if (infoEl) infoEl.textContent = ''
 }
 
-function handleImageSelect(input) {
-  const file = input.files[0]
-  if (!file) return
-  if (!file.type.startsWith('image/')) { showToast('Veuillez sélectionner une image', 'error'); input.value=''; return }
-  if (file.size > 5*1024*1024) { showToast('Image trop grande. Maximum 5 Mo.', 'error'); input.value=''; return }
-  const reader = new FileReader()
-  reader.onload = e => {
-    const img = new Image()
-    img.onload = () => {
-      const MAX=1200; let w=img.width, h=img.height
-      if (w>MAX||h>MAX) { if(w>h){h=Math.round(h*MAX/w);w=MAX}else{w=Math.round(w*MAX/h);h=MAX} }
-      const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h
-      canvas.getContext('2d').drawImage(img,0,0,w,h)
-      const compressed = canvas.toDataURL('image/jpeg', 0.82)
-      pendingImageData = compressed
-      const preview=document.getElementById('img-preview'), zone=document.getElementById('img-upload-zone'), btn=document.getElementById('img-remove-btn')
-      preview.src=compressed; preview.classList.remove('hidden'); zone.classList.add('hidden')
-      if (btn) btn.classList.remove('hidden')
-      document.getElementById('img-info').textContent = `${w}×${h}px — ${Math.round(compressed.length*0.75/1024)} Ko`
+// Compresser une image File → data URL
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) { reject('type'); return }
+    if (file.size > 5*1024*1024) { reject('size'); return }
+    const reader = new FileReader()
+    reader.onload = e => {
+      const img = new Image()
+      img.onload = () => {
+        const MAX=1200; let w=img.width, h=img.height
+        if (w>MAX||h>MAX) { if(w>h){h=Math.round(h*MAX/w);w=MAX}else{w=Math.round(w*MAX/h);h=MAX} }
+        const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h
+        canvas.getContext('2d').drawImage(img,0,0,w,h)
+        resolve(canvas.toDataURL('image/jpeg', 0.82))
+      }
+      img.src = e.target.result
     }
-    img.src = e.target.result
-  }
-  reader.readAsDataURL(file)
+    reader.readAsDataURL(file)
+  })
 }
 
-function removeImage() {
-  pendingImageData=null
-  const preview=document.getElementById('img-preview'), zone=document.getElementById('img-upload-zone'), btn=document.getElementById('img-remove-btn')
-  if(preview){preview.src='';preview.classList.add('hidden')}
-  if(zone) zone.classList.remove('hidden')
-  if(btn)  btn.classList.add('hidden')
-  const i=document.getElementById('nl-image'); if(i) i.value=''
-  const info=document.getElementById('img-info'); if(info) info.textContent=''
+// Rendre la grille de préviews
+function renderPendingImages() {
+  const grid = document.getElementById('img-previews-grid')
+  const zone = document.getElementById('img-upload-zone')
+  const info = document.getElementById('img-info')
+  if (!grid) return
+  grid.innerHTML = pendingImages.map((data, i) => `
+    <div class="relative group rounded-xl overflow-hidden border border-gray-200 bg-gray-50" style="aspect-ratio:1">
+      <img src="${data}" class="w-full h-full object-cover" />
+      ${i===0 ? '<span class="absolute bottom-1 left-1 text-xs bg-primary-600 text-white px-1.5 py-0.5 rounded-lg font-medium">Principale</span>' : ''}
+      <button type="button" onclick="removeImageAt(${i})"
+        class="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center shadow text-xs opacity-0 group-hover:opacity-100 transition">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>`).join('')
+  if (zone) zone.classList.toggle('hidden', pendingImages.length >= 5)
+  if (info) info.textContent = pendingImages.length > 0 ? `${pendingImages.length}/5 photo${pendingImages.length>1?'s':''} sélectionnée${pendingImages.length>1?'s':''}` : ''
+}
+
+function removeImageAt(index) {
+  pendingImages.splice(index, 1)
+  renderPendingImages()
+  const input = document.getElementById('nl-image')
+  if (input) input.value = ''
+}
+
+async function handleImagesSelect(input) {
+  const files = Array.from(input.files || [])
+  const remaining = 5 - pendingImages.length
+  const toProcess = files.slice(0, remaining)
+  for (const file of toProcess) {
+    try {
+      const compressed = await compressImage(file)
+      if (pendingImages.length < 5) pendingImages.push(compressed)
+    } catch(err) {
+      if (err === 'size') showToast('Image trop grande. Maximum 5 Mo.', 'error')
+      else if (err === 'type') showToast('Format non supporté. Utilisez JPG, PNG ou WEBP.', 'error')
+    }
+  }
+  renderPendingImages()
+  input.value = ''
+}
+
+async function handleDropImages(files) {
+  const fileArr = Array.from(files || [])
+  const toProcess = fileArr.slice(0, 5 - pendingImages.length)
+  for (const file of toProcess) {
+    try {
+      const compressed = await compressImage(file)
+      if (pendingImages.length < 5) pendingImages.push(compressed)
+    } catch {}
+  }
+  renderPendingImages()
 }
 
 async function handleNewListing(e) {
@@ -981,10 +1094,9 @@ async function handleNewListing(e) {
   const title=document.getElementById('nl-title').value.trim(), category=document.getElementById('nl-category').value
   const price=document.getElementById('nl-price').value, description=document.getElementById('nl-description').value.trim()
   const location=document.getElementById('nl-location').value, contact=document.getElementById('nl-contact').value.trim()
-  if (pendingImageData && pendingImageData.length>550000) { errEl.textContent='Image trop volumineuse.'; errEl.classList.remove('hidden'); return }
   const btn=e.target.querySelector('[type="submit"]'); btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin mr-2"></i>Publication...'
   try {
-    const res=await fetch('/api/listings',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${authToken}`},body:JSON.stringify({title,category,price:price?parseFloat(price):null,description,location,contact,image_data:pendingImageData||null})})
+    const res=await fetch('/api/listings',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${authToken}`},body:JSON.stringify({title,category,price:price?parseFloat(price):null,description,location,contact,images:pendingImages})})
     const d=await res.json()
     if(!res.ok){errEl.textContent=d.error;errEl.classList.remove('hidden');return}
     e.target.reset(); resetNewListingForm(); showToast('Annonce publiée ! 🎉'); showPage('home'); loadListings()
@@ -1073,6 +1185,11 @@ async function showEditListing(id) {
   try {
     const res = await fetch(`/api/listings/${id}`)
     const { listing: l } = await res.json()
+
+    // Initialiser le tableau d'images d'édition
+    window._editImages = l.images ? l.images.map(i => i.data) : (l.image_data ? [l.image_data] : [])
+    window._editImagesChanged = false
+
     content.innerHTML = `
       <div class="bg-white rounded-2xl shadow-sm p-8 max-w-2xl mx-auto">
         <div class="flex items-center gap-3 mb-6">
@@ -1111,23 +1228,23 @@ async function showEditListing(id) {
               <input type="text" id="edit-contact" value="${escHtml(l.contact||'')}" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
           </div>
-          <!-- Modifier la photo -->
+          <!-- Modifier les photos (max 5) -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"><i class="fas fa-camera mr-1 text-gray-400"></i>Modifier la photo</label>
-            ${l.image_data ? `
-              <div class="relative mb-2">
-                <img id="edit-img-preview" src="${l.image_data}" class="w-full max-h-48 object-contain rounded-xl border border-gray-200 bg-gray-50" />
-                <button type="button" onclick="removeEditImage()" class="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center shadow text-xs"><i class="fas fa-times"></i></button>
-              </div>` : `<div id="edit-img-preview" class="hidden"></div>`}
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              <i class="fas fa-camera mr-1 text-gray-400"></i>Modifier les photos
+              <span class="text-gray-400 font-normal text-xs">(jusqu'à 5 photos)</span>
+            </label>
+            <div id="edit-img-grid" class="grid grid-cols-3 gap-2 mb-2"></div>
             <div id="edit-upload-zone" onclick="document.getElementById('edit-image').click()"
               ondragover="event.preventDefault();this.classList.add('border-primary-400','bg-primary-50')"
               ondragleave="this.classList.remove('border-primary-400','bg-primary-50')"
-              ondrop="event.preventDefault();this.classList.remove('border-primary-400','bg-primary-50');const f=event.dataTransfer.files[0];if(f){const i=document.getElementById('edit-image');const d=new DataTransfer();d.items.add(f);i.files=d.files;handleEditImageSelect(i);}"
-              class="${l.image_data ? 'hidden' : ''} border-2 border-dashed border-gray-300 rounded-xl p-4 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50 transition">
+              ondrop="event.preventDefault();this.classList.remove('border-primary-400','bg-primary-50');handleEditDropImages(event.dataTransfer.files)"
+              class="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50 transition">
               <i class="fas fa-cloud-upload-alt text-2xl text-gray-300 mb-1"></i>
-              <p class="text-sm text-gray-400">Cliquer ou glisser pour changer la photo</p>
+              <p class="text-sm text-gray-400">Cliquer ou glisser pour ajouter des photos</p>
             </div>
-            <input type="file" id="edit-image" accept="image/*" class="hidden" onchange="handleEditImageSelect(this)" />
+            <input type="file" id="edit-image" accept="image/*" multiple class="hidden" onchange="handleEditImagesSelect(this)" />
+            <p id="edit-img-info" class="text-xs text-gray-400 mt-1 text-right"></p>
           </div>
           <div id="edit-error" class="hidden text-sm text-red-600 bg-red-50 px-4 py-2 rounded-lg"></div>
           <div class="flex gap-3 pt-2">
@@ -1136,47 +1253,70 @@ async function showEditListing(id) {
           </div>
         </form>
       </div>`
-    // Stocker l'image existante
-    window._editImageData = l.image_data || null
-    window._editImageRemoved = false
+    renderEditImages()
   } catch {
     content.innerHTML = `<div class="text-center py-12 text-red-400">Erreur de chargement</div>`
   }
 }
 
-function handleEditImageSelect(input) {
-  const file = input.files[0]
-  if (!file) return
-  if (!file.type.startsWith('image/')) { showToast('Veuillez sélectionner une image', 'error'); return }
-  if (file.size > 5*1024*1024) { showToast('Image trop grande. Maximum 5 Mo.', 'error'); return }
-  const reader = new FileReader()
-  reader.onload = e => {
-    const img = new Image()
-    img.onload = () => {
-      const MAX=1200; let w=img.width, h=img.height
-      if(w>MAX||h>MAX){if(w>h){h=Math.round(h*MAX/w);w=MAX}else{w=Math.round(w*MAX/h);h=MAX}}
-      const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h
-      canvas.getContext('2d').drawImage(img,0,0,w,h)
-      const compressed = canvas.toDataURL('image/jpeg', 0.82)
-      window._editImageData = compressed
-      window._editImageRemoved = false
-      const preview = document.getElementById('edit-img-preview')
-      const zone = document.getElementById('edit-upload-zone')
-      if (preview) { preview.src = compressed; preview.classList.remove('hidden') }
-      if (zone) zone.classList.add('hidden')
-    }
-    img.src = e.target.result
-  }
-  reader.readAsDataURL(file)
+function renderEditImages() {
+  const grid = document.getElementById('edit-img-grid')
+  const zone = document.getElementById('edit-upload-zone')
+  const info = document.getElementById('edit-img-info')
+  if (!grid) return
+  const imgs = window._editImages || []
+  grid.innerHTML = imgs.map((data, i) => `
+    <div class="relative group rounded-xl overflow-hidden border border-gray-200 bg-gray-50" style="aspect-ratio:1">
+      <img src="${data}" class="w-full h-full object-cover" />
+      ${i===0 ? '<span class="absolute bottom-1 left-1 text-xs bg-primary-600 text-white px-1.5 py-0.5 rounded-lg font-medium">Principale</span>' : ''}
+      <button type="button" onclick="removeEditImageAt(${i})"
+        class="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center shadow text-xs opacity-0 group-hover:opacity-100 transition">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>`).join('')
+  if (zone) zone.classList.toggle('hidden', imgs.length >= 5)
+  if (info) info.textContent = imgs.length > 0 ? `${imgs.length}/5 photo${imgs.length>1?'s':''} — modifiée${imgs.length>1?'s':''}` : 'Aucune photo'
 }
 
-function removeEditImage() {
-  window._editImageData = null
-  window._editImageRemoved = true
-  const preview = document.getElementById('edit-img-preview')
-  const zone = document.getElementById('edit-upload-zone')
-  if (preview) { preview.src=''; preview.classList.add('hidden') }
-  if (zone) zone.classList.remove('hidden')
+function removeEditImageAt(index) {
+  window._editImages.splice(index, 1)
+  window._editImagesChanged = true
+  renderEditImages()
+  const inp = document.getElementById('edit-image'); if (inp) inp.value = ''
+}
+
+async function handleEditImagesSelect(input) {
+  const files = Array.from(input.files || [])
+  const remaining = 5 - (window._editImages || []).length
+  const toProcess = files.slice(0, remaining)
+  for (const file of toProcess) {
+    try {
+      const compressed = await compressImage(file)
+      if ((window._editImages || []).length < 5) {
+        window._editImages.push(compressed)
+        window._editImagesChanged = true
+      }
+    } catch(err) {
+      if (err === 'size') showToast('Image trop grande. Maximum 5 Mo.', 'error')
+    }
+  }
+  renderEditImages()
+  input.value = ''
+}
+
+async function handleEditDropImages(files) {
+  const fileArr = Array.from(files || [])
+  const toProcess = fileArr.slice(0, 5 - (window._editImages || []).length)
+  for (const file of toProcess) {
+    try {
+      const compressed = await compressImage(file)
+      if ((window._editImages || []).length < 5) {
+        window._editImages.push(compressed)
+        window._editImagesChanged = true
+      }
+    } catch {}
+  }
+  renderEditImages()
 }
 
 async function submitEditListing(e, id) {
@@ -1190,17 +1330,13 @@ async function submitEditListing(e, id) {
   const location    = document.getElementById('edit-location').value.trim()
   const contact     = document.getElementById('edit-contact').value.trim()
 
-  // image_data : nouvelle image, null si supprimée, undefined si inchangée
-  let image_data = undefined
-  if (window._editImageRemoved) image_data = null
-  else if (window._editImageData && window._editImageData !== (await fetch(`/api/listings/${id}`).then(r=>r.json()).catch(()=>({listing:{}})).then(d=>d.listing?.image_data))) {
-    image_data = window._editImageData
-  }
-
   const btn = e.target.querySelector('[type="submit"]'); btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin mr-2"></i>Enregistrement...'
   try {
     const body = { title, category, price: price ? parseFloat(price) : null, description, location, contact }
-    if (image_data !== undefined) body.image_data = image_data
+    // Si les images ont changé, on envoie le tableau complet (ou vide)
+    if (window._editImagesChanged) {
+      body.images = window._editImages || []
+    }
     const res = await fetch(`/api/listings/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },

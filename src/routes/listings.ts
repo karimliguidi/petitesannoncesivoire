@@ -38,7 +38,10 @@ listingsRoutes.get('/', async (c) => {
     let query = `
       SELECT l.id, l.title, l.description, l.category, l.price, l.location, l.contact,
              l.status, l.created_at, u.name as author_name,
-             CASE WHEN l.image_data IS NOT NULL AND l.image_data != '' THEN 1 ELSE 0 END as has_image
+             CASE WHEN l.image_data IS NOT NULL AND l.image_data != '' THEN 1
+                  WHEN EXISTS (SELECT 1 FROM listing_images li WHERE li.listing_id = l.id) THEN 1
+                  ELSE 0 END as has_image,
+             (SELECT COUNT(*) FROM listing_images li WHERE li.listing_id = l.id) as extra_images_count
       FROM listings l
       JOIN users u ON l.user_id = u.id
       WHERE l.status = 'active'
@@ -78,7 +81,7 @@ listingsRoutes.get('/', async (c) => {
   }
 })
 
-// GET /api/listings/:id — détail d'une annonce (avec image_data)
+// GET /api/listings/:id — détail d'une annonce (avec toutes les images)
 listingsRoutes.get('/:id', async (c) => {
   try {
     const id = parseInt(c.req.param('id'))
@@ -88,29 +91,57 @@ listingsRoutes.get('/:id', async (c) => {
       FROM listings l
       JOIN users u ON l.user_id = u.id
       WHERE l.id = ? AND l.status = 'active'
-    `).bind(id).first()
+    `).bind(id).first<any>()
 
     if (!listing) return c.json({ error: 'Annonce introuvable' }, 404)
-    return c.json({ listing })
+
+    // Récupérer les images supplémentaires depuis listing_images
+    const { results: extraImages } = await c.env.DB.prepare(
+      'SELECT id, image_data, position FROM listing_images WHERE listing_id = ? ORDER BY position ASC'
+    ).bind(id).all<{ id: number; image_data: string; position: number }>()
+
+    // Construire le tableau complet d'images (image principale + extras)
+    const images: { id: string; data: string }[] = []
+    if (listing.image_data) {
+      images.push({ id: 'main', data: listing.image_data })
+    }
+    for (const img of extraImages) {
+      images.push({ id: String(img.id), data: img.image_data })
+    }
+
+    return c.json({ listing: { ...listing, images } })
   } catch (err) {
+    console.error('Get listing error:', err)
     return c.json({ error: 'Erreur serveur' }, 500)
   }
 })
 
-// GET /api/listings/:id/image — renvoie uniquement l'image (pour les cartes)
+// GET /api/listings/:id/image — renvoie l'image principale (pour les cartes)
 listingsRoutes.get('/:id/image', async (c) => {
   try {
     const id = parseInt(c.req.param('id'))
-    const row = await c.env.DB.prepare(
-      'SELECT image_data FROM listings WHERE id = ? AND status = \'active\''
+
+    // D'abord on cherche dans listing_images (position 0), sinon image_data principale
+    const extraImg = await c.env.DB.prepare(
+      'SELECT image_data FROM listing_images WHERE listing_id = ? ORDER BY position ASC LIMIT 1'
     ).bind(id).first<{ image_data: string | null }>()
 
-    if (!row || !row.image_data) {
-      return c.json({ error: 'Pas d\'image' }, 404)
+    let imageData: string | null = null
+    if (extraImg?.image_data) {
+      imageData = extraImg.image_data
+    } else {
+      const row = await c.env.DB.prepare(
+        "SELECT image_data FROM listings WHERE id = ? AND status = 'active'"
+      ).bind(id).first<{ image_data: string | null }>()
+      imageData = row?.image_data || null
+    }
+
+    if (!imageData) {
+      return c.json({ error: "Pas d'image" }, 404)
     }
 
     // image_data est "data:image/jpeg;base64,..."
-    const [meta, b64] = row.image_data.split(',')
+    const [meta, b64] = imageData.split(',')
     const mimeMatch = meta.match(/data:([^;]+)/)
     const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg'
     const binary = atob(b64)
@@ -128,20 +159,64 @@ listingsRoutes.get('/:id/image', async (c) => {
   }
 })
 
-// POST /api/listings — créer une annonce (authentifié)
+// GET /api/listings/:id/images/:imgId — renvoie une image spécifique par son ID
+listingsRoutes.get('/:id/images/:imgId', async (c) => {
+  try {
+    const listingId = parseInt(c.req.param('id'))
+    const imgId = c.req.param('imgId')
+
+    let imageData: string | null = null
+
+    if (imgId === 'main') {
+      const row = await c.env.DB.prepare(
+        "SELECT image_data FROM listings WHERE id = ? AND status = 'active'"
+      ).bind(listingId).first<{ image_data: string | null }>()
+      imageData = row?.image_data || null
+    } else {
+      const row = await c.env.DB.prepare(
+        'SELECT image_data FROM listing_images WHERE id = ? AND listing_id = ?'
+      ).bind(parseInt(imgId), listingId).first<{ image_data: string | null }>()
+      imageData = row?.image_data || null
+    }
+
+    if (!imageData) return c.json({ error: "Image introuvable" }, 404)
+
+    const [meta, b64] = imageData.split(',')
+    const mimeMatch = meta.match(/data:([^;]+)/)
+    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg'
+    const binary = atob(b64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+
+    return new Response(bytes, {
+      headers: { 'Content-Type': mime, 'Cache-Control': 'public, max-age=86400' }
+    })
+  } catch (err) {
+    return c.json({ error: 'Erreur serveur' }, 500)
+  }
+})
+
+// POST /api/listings — créer une annonce (authentifié) avec jusqu'à 5 images
 listingsRoutes.post('/', authMiddleware, async (c) => {
   try {
     const userId = c.get('userId')
-    const { title, description, category, price, location, contact, image_data } = await c.req.json()
+    const { title, description, category, price, location, contact, images } = await c.req.json()
 
     if (!title || !description || !category) {
       return c.json({ error: 'Titre, description et catégorie sont obligatoires' }, 400)
     }
 
-    // Validation image : max ~400KB en base64
-    if (image_data && image_data.length > 550000) {
-      return c.json({ error: 'Image trop grande (max 400 Ko). Veuillez la compresser.' }, 400)
+    // images = tableau de data URLs (max 5)
+    const imageArray: string[] = Array.isArray(images) ? images.slice(0, 5) : []
+
+    // Validation de chaque image : max ~400KB
+    for (const img of imageArray) {
+      if (img && img.length > 550000) {
+        return c.json({ error: 'Une des images est trop grande (max 400 Ko). Veuillez la compresser.' }, 400)
+      }
     }
+
+    const mainImage = imageArray[0] || null
 
     const result = await c.env.DB.prepare(`
       INSERT INTO listings (user_id, title, description, category, price, location, contact, image_data)
@@ -154,10 +229,21 @@ listingsRoutes.post('/', authMiddleware, async (c) => {
       price ? parseFloat(price) : null,
       location?.trim() || null,
       contact?.trim() || null,
-      image_data || null
+      mainImage
     ).run()
 
-    return c.json({ id: result.meta.last_row_id, message: 'Annonce publiée avec succès' }, 201)
+    const listingId = result.meta.last_row_id as number
+
+    // Insérer les images supplémentaires dans listing_images
+    for (let i = 0; i < imageArray.length; i++) {
+      if (imageArray[i]) {
+        await c.env.DB.prepare(
+          'INSERT INTO listing_images (listing_id, image_data, position) VALUES (?, ?, ?)'
+        ).bind(listingId, imageArray[i], i).run()
+      }
+    }
+
+    return c.json({ id: listingId, message: 'Annonce publiée avec succès' }, 201)
   } catch (err) {
     console.error('Create listing error:', err)
     return c.json({ error: 'Erreur serveur lors de la publication' }, 500)
@@ -176,6 +262,7 @@ listingsRoutes.delete('/:id', authMiddleware, async (c) => {
 
     if (!listing) return c.json({ error: 'Annonce introuvable ou non autorisé' }, 404)
 
+    // Les listing_images sont supprimées en cascade (ON DELETE CASCADE)
     await c.env.DB.prepare('DELETE FROM listings WHERE id = ?').bind(id).run()
     return c.json({ message: 'Annonce supprimée' })
   } catch (err) {
@@ -183,18 +270,15 @@ listingsRoutes.delete('/:id', authMiddleware, async (c) => {
   }
 })
 
-// PUT /api/listings/:id — modifier son annonce (authentifié)
+// PUT /api/listings/:id — modifier son annonce (authentifié) avec jusqu'à 5 images
 listingsRoutes.put('/:id', authMiddleware, async (c) => {
   try {
     const userId = c.get('userId')
     const id = parseInt(c.req.param('id'))
-    const { title, description, category, price, location, contact, image_data } = await c.req.json()
+    const { title, description, category, price, location, contact, images } = await c.req.json()
 
     if (!title || !description || !category) {
       return c.json({ error: 'Titre, description et catégorie sont obligatoires' }, 400)
-    }
-    if (image_data && image_data.length > 550000) {
-      return c.json({ error: 'Image trop grande (max 400 Ko)' }, 400)
     }
 
     const listing = await c.env.DB.prepare(
@@ -202,17 +286,41 @@ listingsRoutes.put('/:id', authMiddleware, async (c) => {
     ).bind(id, userId).first()
     if (!listing) return c.json({ error: 'Annonce introuvable ou non autorisé' }, 404)
 
-    // Si image_data est null on garde l'ancienne, si c'est une string vide on supprime
-    if (image_data === undefined) {
+    // images = undefined → on garde les anciennes
+    // images = [] → on supprime toutes les images
+    // images = ['data:...', ...] → on remplace
+    if (images !== undefined) {
+      const imageArray: string[] = Array.isArray(images) ? images.slice(0, 5) : []
+
+      for (const img of imageArray) {
+        if (img && img.length > 550000) {
+          return c.json({ error: 'Une des images est trop grande (max 400 Ko)' }, 400)
+        }
+      }
+
+      const mainImage = imageArray[0] || null
+
+      await c.env.DB.prepare(`
+        UPDATE listings SET title=?, description=?, category=?, price=?, location=?, contact=?, image_data=? WHERE id=?
+      `).bind(title.trim(), description.trim(), category, price ? parseFloat(price) : null,
+              location?.trim() || null, contact?.trim() || null, mainImage, id).run()
+
+      // Supprimer les anciennes images supplémentaires et réinsérer
+      await c.env.DB.prepare('DELETE FROM listing_images WHERE listing_id = ?').bind(id).run()
+
+      for (let i = 0; i < imageArray.length; i++) {
+        if (imageArray[i]) {
+          await c.env.DB.prepare(
+            'INSERT INTO listing_images (listing_id, image_data, position) VALUES (?, ?, ?)'
+          ).bind(id, imageArray[i], i).run()
+        }
+      }
+    } else {
+      // Pas d'images envoyées → on garde tout, on modifie seulement les champs texte
       await c.env.DB.prepare(`
         UPDATE listings SET title=?, description=?, category=?, price=?, location=?, contact=? WHERE id=?
       `).bind(title.trim(), description.trim(), category, price ? parseFloat(price) : null,
               location?.trim() || null, contact?.trim() || null, id).run()
-    } else {
-      await c.env.DB.prepare(`
-        UPDATE listings SET title=?, description=?, category=?, price=?, location=?, contact=?, image_data=? WHERE id=?
-      `).bind(title.trim(), description.trim(), category, price ? parseFloat(price) : null,
-              location?.trim() || null, contact?.trim() || null, image_data || null, id).run()
     }
 
     return c.json({ message: 'Annonce mise à jour avec succès' })
