@@ -111,6 +111,37 @@ profileRoutes.get('/admin/stats', adminMiddleware, async (c) => {
       'SELECT id, name, email, city, created_at FROM users ORDER BY created_at DESC LIMIT 10'
     ).all()
 
+    // Annonces par jour (30 derniers jours)
+    const { results: listingsByDay } = await c.env.DB.prepare(
+      `SELECT date(created_at) as day, COUNT(*) as count
+       FROM listings
+       WHERE created_at >= date('now', '-29 days')
+       GROUP BY date(created_at)
+       ORDER BY day ASC`
+    ).all()
+
+    // Inscriptions par jour (30 derniers jours)
+    const { results: usersByDay } = await c.env.DB.prepare(
+      `SELECT date(created_at) as day, COUNT(*) as count
+       FROM users
+       WHERE created_at >= date('now', '-29 days')
+       GROUP BY date(created_at)
+       ORDER BY day ASC`
+    ).all()
+
+    // Top annonces (les plus récentes avec vues simulées via favoris)
+    const { results: topListings } = await c.env.DB.prepare(
+      `SELECT l.id, l.title, l.category, l.price, l.location,
+              COUNT(f.id) as favorites_count, u.name as author_name
+       FROM listings l
+       LEFT JOIN favorites f ON f.listing_id = l.id
+       LEFT JOIN users u ON u.id = l.user_id
+       WHERE l.status = 'active'
+       GROUP BY l.id
+       ORDER BY favorites_count DESC, l.created_at DESC
+       LIMIT 5`
+    ).all()
+
     return c.json({
       stats: {
         total_users: totalUsers?.n || 0,
@@ -122,6 +153,9 @@ profileRoutes.get('/admin/stats', adminMiddleware, async (c) => {
         new_listings_today: newListingsToday?.n || 0,
       },
       top_categories: topCats,
+      listings_by_day: listingsByDay,
+      users_by_day: usersByDay,
+      top_listings: topListings,
       latest_users: latestUsers
     })
   } catch (err) {
