@@ -1660,46 +1660,191 @@ async function loadAdminStats() {
   try {
     const res = await fetch('/api/profile/admin/stats', { headers:{Authorization:`Bearer ${authToken}`} })
     if (!res.ok) { content.innerHTML=`<div class="text-center py-12 text-red-400">Accès refusé</div>`; return }
-    const { stats, top_categories, latest_users } = await res.json()
+    const { stats, top_categories, latest_users, listings_by_day, users_by_day, top_listings } = await res.json()
+
+    // Préparer les données pour les graphiques (30 derniers jours)
+    const last30 = []
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i)
+      last30.push(d.toISOString().split('T')[0])
+    }
+    const listingsMap = Object.fromEntries((listings_by_day||[]).map(r => [r.day, r.count]))
+    const usersMap    = Object.fromEntries((users_by_day||[]).map(r => [r.day, r.count]))
+    const listingsData = last30.map(d => listingsMap[d] || 0)
+    const usersData    = last30.map(d => usersMap[d] || 0)
+    const labels       = last30.map(d => {
+      const dt = new Date(d + 'T00:00:00')
+      return dt.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+    })
+
     content.innerHTML = `
+      <!-- KPIs -->
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         ${[
-          ['Utilisateurs',stats.total_users,'fa-users','blue'],
-          ['Annonces actives',stats.active_listings,'fa-list','green'],
-          ['Messages',stats.total_messages,'fa-envelope','purple'],
-          ['Favoris',stats.total_favorites,'fa-heart','red'],
-        ].map(([label,val,icon,color])=>`
-          <div class="bg-white rounded-xl border p-4 text-center">
-            <div class="w-10 h-10 bg-${color}-100 rounded-xl flex items-center justify-center mx-auto mb-2"><i class="fas ${icon} text-${color}-500"></i></div>
+          ['Utilisateurs',    stats.total_users,          'fa-users',    'blue',   `+${stats.new_users_today} aujourd'hui`],
+          ['Annonces actives',stats.active_listings,      'fa-list',     'green',  `+${stats.new_listings_today} aujourd'hui`],
+          ['Messages',        stats.total_messages,       'fa-envelope', 'purple', 'total échangés'],
+          ['Favoris',         stats.total_favorites,      'fa-heart',    'red',    'total enregistrés'],
+        ].map(([label,val,icon,color,sub])=>`
+          <div class="bg-white rounded-xl border p-4">
+            <div class="flex items-center justify-between mb-2">
+              <div class="w-9 h-9 bg-${color}-100 rounded-xl flex items-center justify-center">
+                <i class="fas ${icon} text-${color}-500 text-sm"></i>
+              </div>
+              <span class="text-xs text-gray-400">${sub}</span>
+            </div>
             <div class="text-2xl font-bold text-gray-800">${val}</div>
-            <p class="text-xs text-gray-500">${label}</p>
+            <p class="text-xs text-gray-500 mt-0.5">${label}</p>
           </div>`).join('')}
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+      <!-- Graphiques -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <!-- Annonces par jour -->
         <div class="bg-white rounded-xl border p-5">
-          <h3 class="font-bold text-gray-800 mb-4">Top catégories</h3>
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-gray-800 text-sm"><i class="fas fa-chart-line text-primary-500 mr-2"></i>Annonces publiées (30j)</h3>
+            <span class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">Total : ${stats.total_listings}</span>
+          </div>
+          <canvas id="chart-listings" height="120"></canvas>
+        </div>
+        <!-- Inscriptions par jour -->
+        <div class="bg-white rounded-xl border p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-gray-800 text-sm"><i class="fas fa-user-plus text-accent-500 mr-2"></i>Inscriptions (30j)</h3>
+            <span class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">Total : ${stats.total_users}</span>
+          </div>
+          <canvas id="chart-users" height="120"></canvas>
+        </div>
+      </div>
+
+      <!-- Top annonces + Top catégories + Derniers inscrits -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Top annonces par favoris -->
+        <div class="bg-white rounded-xl border p-5">
+          <h3 class="font-bold text-gray-800 mb-4 text-sm"><i class="fas fa-fire text-orange-400 mr-2"></i>Top annonces</h3>
           <div class="space-y-3">
-            ${top_categories.map(c=>`
-              <div class="flex items-center gap-3">
-                <span class="text-sm text-gray-700 flex-1">${c.category}</span>
-                <div class="flex-1 bg-gray-100 rounded-full h-2"><div class="bg-primary-500 h-2 rounded-full" style="width:${Math.min(100,c.count*5)}%"></div></div>
-                <span class="text-sm font-semibold text-gray-600 w-8 text-right">${c.count}</span>
-              </div>`).join('')}
+            ${(top_listings||[]).length ? (top_listings||[]).map((l,i)=>`
+              <div onclick="showListing(${l.id})" class="flex items-center gap-3 cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-2 transition">
+                <div class="w-7 h-7 rounded-full flex items-center justify-center font-bold text-sm shrink-0
+                  ${i===0?'bg-yellow-100 text-yellow-600':i===1?'bg-gray-100 text-gray-500':i===2?'bg-orange-100 text-orange-500':'bg-gray-50 text-gray-400'}">
+                  ${i+1}
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-gray-800 truncate">${escHtml(l.title)}</p>
+                  <p class="text-xs text-gray-400">${l.category} · ${escHtml(l.author_name||'')}</p>
+                </div>
+                <div class="flex items-center gap-1 text-xs text-red-400 shrink-0">
+                  <i class="fas fa-heart text-xs"></i>${l.favorites_count}
+                </div>
+              </div>`).join('') : `<p class="text-sm text-gray-400 text-center py-4">Pas encore de données</p>`}
           </div>
         </div>
+
+        <!-- Top catégories -->
         <div class="bg-white rounded-xl border p-5">
-          <h3 class="font-bold text-gray-800 mb-4">Derniers inscrits</h3>
+          <h3 class="font-bold text-gray-800 mb-4 text-sm"><i class="fas fa-th-large text-primary-500 mr-2"></i>Top catégories</h3>
+          <div class="space-y-3">
+            ${(top_categories||[]).map(c=>{
+              const cat = CATEGORIES.find(k => k.name === c.category)
+              const maxCount = Math.max(...(top_categories||[]).map(x=>x.count), 1)
+              return `
+              <div class="flex items-center gap-3">
+                <span class="text-lg w-6 text-center shrink-0">${cat?cat.emoji:'📦'}</span>
+                <div class="flex-1">
+                  <div class="flex justify-between mb-1">
+                    <span class="text-xs text-gray-700 font-medium">${c.category}</span>
+                    <span class="text-xs font-bold text-gray-600">${c.count}</span>
+                  </div>
+                  <div class="bg-gray-100 rounded-full h-1.5">
+                    <div class="bg-primary-500 h-1.5 rounded-full transition-all" style="width:${Math.round(c.count/maxCount*100)}%"></div>
+                  </div>
+                </div>
+              </div>`}).join('')}
+          </div>
+        </div>
+
+        <!-- Derniers inscrits -->
+        <div class="bg-white rounded-xl border p-5">
+          <h3 class="font-bold text-gray-800 mb-4 text-sm"><i class="fas fa-user-clock text-blue-400 mr-2"></i>Derniers inscrits</h3>
           <div class="space-y-2">
-            ${latest_users.map(u=>`
-              <div class="flex items-center gap-3 text-sm">
-                <div class="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center shrink-0"><i class="fas fa-user text-primary-400 text-xs"></i></div>
-                <div class="flex-1 min-w-0"><p class="font-medium text-gray-800 truncate">${escHtml(u.name)}</p><p class="text-xs text-gray-400 truncate">${escHtml(u.email)}</p></div>
-                <span class="text-xs text-gray-300">${timeAgo(u.created_at)}</span>
+            ${(latest_users||[]).map(u=>`
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center shrink-0 overflow-hidden">
+                  ${u.avatar ? `<img src="${u.avatar}" class="w-full h-full object-cover"/>` : `<i class="fas fa-user text-primary-400 text-xs"></i>`}
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-gray-800 truncate">${escHtml(u.name)}</p>
+                  <p class="text-xs text-gray-400 truncate">${escHtml(u.email)}</p>
+                </div>
+                <span class="text-xs text-gray-300 shrink-0">${timeAgo(u.created_at)}</span>
               </div>`).join('')}
           </div>
         </div>
       </div>`
-  } catch { content.innerHTML=`<div class="text-center py-12 text-red-400">Erreur</div>` }
+
+    // ── Charger Chart.js et dessiner les graphiques ────────────
+    await loadChartJs()
+    drawLineChart('chart-listings', labels, listingsData, 'Annonces', '#ea580c', '#fff7ed')
+    drawLineChart('chart-users',    labels, usersData,    'Inscriptions', '#22c55e', '#f0fdf4')
+
+  } catch(e) { content.innerHTML=`<div class="text-center py-12 text-red-400">Erreur : ${e.message}</div>` }
+}
+
+// Charger Chart.js dynamiquement si pas encore chargé
+function loadChartJs() {
+  return new Promise((resolve) => {
+    if (window.Chart) { resolve(); return }
+    const s = document.createElement('script')
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js'
+    s.onload = resolve
+    document.head.appendChild(s)
+  })
+}
+
+function drawLineChart(canvasId, labels, data, label, color, bgColor) {
+  const canvas = document.getElementById(canvasId)
+  if (!canvas) return
+  // Détruire un éventuel graphique précédent
+  if (canvas._chartInstance) canvas._chartInstance.destroy()
+
+  // Afficher seulement 1 label sur 5 pour ne pas surcharger l'axe X
+  const sparseLabels = labels.map((l, i) => i % 5 === 0 ? l : '')
+
+  canvas._chartInstance = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: sparseLabels,
+      datasets: [{
+        label,
+        data,
+        borderColor: color,
+        backgroundColor: bgColor,
+        borderWidth: 2,
+        pointRadius: 3,
+        pointBackgroundColor: color,
+        fill: true,
+        tension: 0.4,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => labels[items[0].dataIndex],
+            label: (item) => `${item.dataset.label} : ${item.raw}`
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 10 }, color: '#9ca3af' } },
+        y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 10 }, color: '#9ca3af' }, grid: { color: '#f3f4f6' } }
+      }
+    }
+  })
 }
 
 async function loadAdminListings() {
@@ -1793,4 +1938,3 @@ function escHtml(str) {
   if (!str) return ''
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
 }
-
