@@ -444,6 +444,52 @@ async function showListing(id) {
               <button onclick="archiveListing(${l.id})" class="flex-1 bg-gray-100 text-gray-600 hover:bg-gray-200 py-2 rounded-xl font-medium text-sm transition"><i class="fas fa-archive mr-2"></i>Archiver</button>
               <button onclick="deleteListing(${l.id})" class="flex-1 bg-red-50 text-red-600 hover:bg-red-100 py-2 rounded-xl font-medium text-sm transition"><i class="fas fa-trash mr-2"></i>Supprimer</button>
             </div>` : ''}
+
+          <!-- DISCLAIMER SÉCURITÉ -->
+          <div class="mt-6 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+            <div class="flex items-center gap-2 mb-3">
+              <div class="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center shrink-0">
+                <i class="fas fa-shield-alt text-orange-500 text-sm"></i>
+              </div>
+              <p class="font-bold text-orange-700 text-sm">⚠️ Conseils de sécurité — PetitesAnnoncesIvoire.com</p>
+            </div>
+
+            <p class="text-orange-800 text-sm font-semibold mb-2">🚨 Méfiez-vous des arnaques !</p>
+            <p class="text-orange-700 text-xs mb-3 leading-relaxed">
+              Ne payez jamais à l'avance sans avoir vu l'article en personne. Privilégiez toujours les rencontres dans un <strong>lieu public et sécurisé</strong> (marché, centre commercial, commissariat).
+            </p>
+
+            <div class="bg-orange-100 rounded-xl p-3 mb-3">
+              <p class="text-orange-800 text-xs font-bold mb-1">🚫 Ne communiquez jamais :</p>
+              <ul class="text-orange-700 text-xs space-y-0.5 list-disc list-inside">
+                <li>Vos informations bancaires ou numéro de compte</li>
+                <li>Votre code OTP ou code secret Mobile Money</li>
+                <li>Vos mots de passe ou informations personnelles</li>
+              </ul>
+            </div>
+
+            <div class="mb-3">
+              <p class="text-orange-800 text-xs font-bold mb-1">💡 Nos conseils :</p>
+              <ul class="text-orange-700 text-xs space-y-0.5 list-disc list-inside">
+                <li>Vérifiez toujours l'article avant tout paiement</li>
+                <li>Méfiez-vous des prix trop bas ou des offres trop belles</li>
+                <li>Privilégiez le paiement en main propre à la livraison</li>
+                <li>En cas de doute, signalez l'annonce via le bouton 🚩</li>
+              </ul>
+            </div>
+
+            <div class="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl p-3 mb-3">
+              <i class="fas fa-phone-alt text-red-500 text-sm mt-0.5 shrink-0"></i>
+              <p class="text-red-700 text-xs leading-relaxed">
+                <strong>En cas d'arnaque</strong>, contactez la <strong>Police Nationale de Côte d'Ivoire</strong> au <strong class="text-red-600">111</strong> ou la <strong>Direction de l'Informatique et des Traces Technologiques (DITT)</strong>.
+              </p>
+            </div>
+
+            <p class="text-orange-500 text-xs italic text-center">
+              <i class="fas fa-info-circle mr-1"></i>PetitesAnnoncesIvoire.com n'est pas responsable des transactions effectuées entre particuliers.
+            </p>
+          </div>
+
         </div>
       </div>`
   } catch {
