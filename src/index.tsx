@@ -169,11 +169,66 @@ app.get('*', (c) => {
           </div>
           <h1 class="text-2xl sm:text-3xl font-bold mb-2">La bonne affaire est près de chez toi !</h1>
           <p class="text-white/90 mb-5 text-sm">Abidjan, Bouaké, San-Pédro et partout en Côte d'Ivoire</p>
-          <div class="flex max-w-2xl mx-auto gap-2">
-            <input type="text" id="search-input" placeholder="Téléphone, moto, maison, emploi..." class="flex-1 px-4 py-3 rounded-xl text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-white shadow-sm" />
-            <button onclick="searchListings()" class="bg-white text-primary-600 hover:bg-gray-50 px-5 py-3 rounded-xl font-bold transition shadow-sm">
-              <i class="fas fa-search"></i>
-            </button>
+          <div class="relative max-w-2xl mx-auto">
+            <div class="flex gap-2">
+              <!-- Champ de recherche -->
+              <div class="relative flex-1">
+                <input
+                  type="text"
+                  id="search-input"
+                  placeholder="Téléphone, moto, maison, emploi..."
+                  autocomplete="off"
+                  class="w-full pl-4 pr-10 py-3 rounded-xl text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-white shadow-sm"
+                  onfocus="onSearchFocus()"
+                  oninput="onSearchInput(this.value)"
+                  onkeydown="onSearchKeydown(event)"
+                />
+                <!-- Bouton effacer -->
+                <button id="search-clear-btn"
+                  onclick="clearSearch()"
+                  class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition">
+                  <i class="fas fa-times text-sm"></i>
+                </button>
+              </div>
+              <!-- Bouton rechercher -->
+              <button onclick="searchListings()" class="bg-white text-primary-600 hover:bg-gray-50 px-5 py-3 rounded-xl font-bold transition shadow-sm shrink-0">
+                <i class="fas fa-search"></i>
+              </button>
+            </div>
+
+            <!-- Dropdown auto-complétion -->
+            <div id="search-dropdown"
+              class="hidden absolute left-0 right-12 top-full mt-1 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-50 text-left"
+              onmouseleave="updateSearchSelection(document.querySelectorAll('.search-dd-item'))">
+
+              <!-- Historique -->
+              <div id="search-history-section" class="hidden">
+                <div class="flex items-center justify-between px-4 pt-3 pb-1">
+                  <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Recherches récentes</span>
+                  <button onclick="clearSearchHistory()" class="text-xs text-gray-400 hover:text-red-500 transition">
+                    <i class="fas fa-trash-alt mr-1"></i>Effacer
+                  </button>
+                </div>
+                <div id="search-history-list"></div>
+              </div>
+
+              <!-- Suggestions dynamiques -->
+              <div id="search-suggestions-section" class="hidden">
+                <div class="px-4 pt-3 pb-1">
+                  <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Suggestions</span>
+                </div>
+                <div id="search-suggestions-list"></div>
+              </div>
+
+              <!-- Accès rapide catégories + villes -->
+              <div id="search-quick-section" class="hidden">
+                <div class="px-4 pt-3 pb-1">
+                  <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Accès rapide</span>
+                </div>
+                <div id="search-quick-list"></div>
+              </div>
+
+            </div>
           </div>
         </div>
       </div>

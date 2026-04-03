@@ -82,6 +82,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const menu = document.getElementById('profile-menu')
     const btn  = e.target.closest('[onclick="toggleProfileMenu()"]')
     if (!btn && menu && !menu.contains(e.target)) menu.classList.add('hidden')
+
+    // Fermer le dropdown de recherche au clic extérieur
+    const dd       = document.getElementById('search-dropdown')
+    const searchEl = document.getElementById('search-input')
+    if (dd && !dd.contains(e.target) && e.target !== searchEl) hideSearchDropdown()
   })
 })
 
