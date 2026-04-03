@@ -1205,7 +1205,8 @@ function updateDarkModeBtn() {
   btn.title = isDark ? 'Mode clair' : 'Mode sombre'
 }
 
-// ── Administration ─────────────────────────────────────────────function adminTab(tab) {
+// ── Administration ─────────────────────────────────────────────
+function adminTab(tab) {
   document.querySelectorAll('.admin-tab-btn').forEach(b => b.classList.remove('bg-white','shadow','text-primary-600'))
   const active = document.getElementById(`admin-tab-${tab}`)
   if (active) active.classList.add('bg-white','shadow','text-primary-600')
