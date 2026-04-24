@@ -1,0 +1,29 @@
+{
+  "name": "PetitesAnnoncesIvoire.com",
+  "short_name": "PAIvoire",
+  "description": "Le site de petites annonces N°1 en Côte d'Ivoire",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ea580c",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%23ea580c'/><text y='.9em' font-size='140' x='24'>🏷️</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='100' fill='%23ea580c'/><text y='.9em' font-size='380' x='66'>🏷️</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["shopping", "business"],
+  "lang": "fr-CI",
+  "dir": "ltr",
+  "scope": "/",
+  "screenshots": []
+}

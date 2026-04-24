@@ -9,6 +9,7 @@ import { favoritesRoutes } from './routes/favorites'
 import { notificationsRoutes } from './routes/notifications'
 import { profileRoutes } from './routes/profile'
 import { reportsRoutes } from './routes/reports'
+import { reviewsRoutes } from './routes/reviews'
 
 export type Bindings = {
   DB: D1Database
@@ -28,6 +29,7 @@ app.route('/api/favorites', favoritesRoutes)
 app.route('/api/notifications', notificationsRoutes)
 app.route('/api/profile', profileRoutes)
 app.route('/api/reports', reportsRoutes)
+app.route('/api/reviews', reviewsRoutes)
 
 // Route principale → SPA
 app.get('*', (c) => {
@@ -37,7 +39,25 @@ app.get('*', (c) => {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PetitesAnnoncesIvoire.com — Achetez, Vendez, Échangez en Côte d'Ivoire</title>
-  <meta name="description" content="Le site de petites annonces numéro 1 en Côte d'Ivoire." />
+  <meta name="description" content="Le site de petites annonces numéro 1 en Côte d'Ivoire. Achetez, vendez et échangez à Abidjan, Bouaké, Yamoussoukro et partout en Côte d'Ivoire." />
+  <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#ea580c" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="PAIvoire" />
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23ea580c'/><text y='.9em' font-size='75' x='12'>🏷️</text></svg>" />
+  <!-- OG / Twitter -->
+  <meta property="og:title" content="PetitesAnnoncesIvoire.com" />
+  <meta property="og:description" content="Le site de petites annonces N°1 en Côte d'Ivoire. Achetez, vendez, échangez." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://petitesannoncesivoire.com" />
+  <meta property="og:image" content="https://webapp-932.pages.dev/static/og-image.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="PetitesAnnoncesIvoire.com" />
+  <meta name="twitter:description" content="Le site de petites annonces N°1 en Côte d'Ivoire." />
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet" />
   <link rel="stylesheet" href="/static/styles.css" />
@@ -58,6 +78,13 @@ app.get('*', (c) => {
       background-color: #1e293b !important; color: #e2e8f0 !important; border-color: #475569 !important;
     }
     .dark-mode footer { background-color: #1e293b !important; border-color: #334155 !important; }
+    /* Skeleton loading */
+    .skeleton { background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
+    .dark-mode .skeleton { background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%); background-size: 200% 100%; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    /* Stars rating */
+    .star-rating .star { cursor: pointer; transition: color 0.1s; }
+    .star-rating .star:hover, .star-rating .star.active { color: #f59e0b; }
   </style>
   <script>
     tailwind.config = {
@@ -314,17 +341,32 @@ app.get('*', (c) => {
         <div class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-11 gap-2" id="categories-grid"></div>
       </div>
 
-      <!-- Titre annonces -->
-      <div class="flex items-center justify-between mb-4">
+      <!-- Titre annonces + filtre photo -->
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h2 class="text-lg font-bold text-gray-800"><span id="listings-title">Toutes les annonces</span></h2>
-        <button id="btn-reset-filter" onclick="resetFilter()" class="hidden text-sm text-primary-600 hover:underline flex items-center gap-1">
-          <i class="fas fa-times"></i> Effacer
-        </button>
+        <div class="flex items-center gap-2">
+          <label class="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+            <input type="checkbox" id="filter-with-photo" onchange="togglePhotoFilter()" class="w-4 h-4 accent-primary-600 cursor-pointer" />
+            <i class="fas fa-camera text-gray-400 text-xs"></i>Avec photo
+          </label>
+          <button id="btn-reset-filter" onclick="resetFilter()" class="hidden text-sm text-primary-600 hover:underline flex items-center gap-1">
+            <i class="fas fa-times"></i> Effacer
+          </button>
+        </div>
       </div>
 
       <!-- Grille -->
       <div id="listings-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        <div class="col-span-full text-center text-gray-400 py-12"><i class="fas fa-spinner fa-spin text-3xl mb-3"></i></div>
+        <!-- Skeletons de chargement initial -->
+        ${[...Array(8)].map(()=>`
+        <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div class="h-40 skeleton"></div>
+          <div class="p-3 space-y-2">
+            <div class="h-4 skeleton rounded w-3/4"></div>
+            <div class="h-3 skeleton rounded w-full"></div>
+            <div class="h-3 skeleton rounded w-1/2"></div>
+          </div>
+        </div>`).join('')}
       </div>
 
       <!-- Pagination -->
@@ -639,6 +681,21 @@ app.get('*', (c) => {
 
   </main>
 
+  <!-- BANNIÈRE INSTALL PWA -->
+  <div id="pwa-install-banner" class="hidden fixed bottom-0 left-0 right-0 z-40 bg-primary-600 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-xl">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center shrink-0"><i class="fas fa-mobile-alt text-lg"></i></div>
+      <div>
+        <p class="font-semibold text-sm">Installer l'application</p>
+        <p class="text-xs text-white/80">Accès rapide depuis ton écran d'accueil</p>
+      </div>
+    </div>
+    <div class="flex gap-2 shrink-0">
+      <button onclick="dismissPWA()" class="text-white/70 hover:text-white text-sm px-3 py-1.5 rounded-lg transition">Plus tard</button>
+      <button onclick="installPWA()" class="bg-white text-primary-600 font-semibold text-sm px-4 py-1.5 rounded-lg hover:bg-primary-50 transition">Installer</button>
+    </div>
+  </div>
+
   <!-- FOOTER -->
   <footer class="mt-12 bg-white border-t border-gray-200 py-8">
     <div class="max-w-7xl mx-auto px-4 text-center">
@@ -701,7 +758,15 @@ app.get('*', (c) => {
         <h3 class="font-bold text-gray-800 text-lg">Contacter le vendeur</h3>
         <button onclick="closeMessageModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
       </div>
-      <p id="modal-listing-title" class="text-sm text-gray-500 mb-4 bg-gray-50 px-3 py-2 rounded-lg"></p>
+      <p id="modal-listing-title" class="text-sm text-gray-500 mb-3 bg-gray-50 px-3 py-2 rounded-lg"></p>
+      <!-- Modèles de messages prédéfinis -->
+      <div class="flex flex-wrap gap-1.5 mb-3">
+        <span class="text-xs text-gray-400 w-full font-medium">Messages rapides :</span>
+        <button onclick="setQuickMsg('Bonjour, est-ce toujours disponible ?')" class="text-xs bg-gray-100 hover:bg-primary-50 hover:text-primary-600 px-2.5 py-1 rounded-full transition">Disponible ?</button>
+        <button onclick="setQuickMsg('Quel est votre dernier prix ?')" class="text-xs bg-gray-100 hover:bg-primary-50 hover:text-primary-600 px-2.5 py-1 rounded-full transition">Dernier prix ?</button>
+        <button onclick="setQuickMsg('Bonjour, je suis intéressé(e). Peut-on se rencontrer ?')" class="text-xs bg-gray-100 hover:bg-primary-50 hover:text-primary-600 px-2.5 py-1 rounded-full transition">Rencontre ?</button>
+        <button onclick="setQuickMsg('Bonjour, livrez-vous à domicile ?')" class="text-xs bg-gray-100 hover:bg-primary-50 hover:text-primary-600 px-2.5 py-1 rounded-full transition">Livraison ?</button>
+      </div>
       <textarea id="modal-message-text" rows="4" placeholder="Bonjour, je suis intéressé par votre annonce..." class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none mb-4"></textarea>
       <div id="modal-msg-error" class="hidden text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg mb-3"></div>
       <div class="flex gap-3">
@@ -711,7 +776,77 @@ app.get('*', (c) => {
     </div>
   </div>
 
+  <!-- MODAL AVIS VENDEUR -->
+  <div id="modal-review" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-bold text-gray-800 text-lg"><i class="fas fa-star text-yellow-400 mr-2"></i>Laisser un avis</h3>
+        <button onclick="closeReviewModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+      </div>
+      <p id="review-seller-name" class="text-sm text-gray-500 mb-4"></p>
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">Note *</label>
+        <div class="star-rating flex gap-2 text-3xl" id="star-rating-input">
+          <span class="star text-gray-200" data-val="1" onclick="setReviewRating(1)">★</span>
+          <span class="star text-gray-200" data-val="2" onclick="setReviewRating(2)">★</span>
+          <span class="star text-gray-200" data-val="3" onclick="setReviewRating(3)">★</span>
+          <span class="star text-gray-200" data-val="4" onclick="setReviewRating(4)">★</span>
+          <span class="star text-gray-200" data-val="5" onclick="setReviewRating(5)">★</span>
+        </div>
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Commentaire (facultatif)</label>
+        <textarea id="review-comment" rows="3" placeholder="Décris ton expérience avec ce vendeur..." class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"></textarea>
+      </div>
+      <div id="review-error" class="hidden text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg mb-3"></div>
+      <div class="flex gap-3">
+        <button onclick="closeReviewModal()" class="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-xl font-medium hover:bg-gray-50 transition text-sm">Annuler</button>
+        <button onclick="submitReview()" class="flex-1 bg-yellow-400 hover:bg-yellow-500 text-white py-2.5 rounded-xl font-semibold transition text-sm"><i class="fas fa-star mr-2"></i>Publier l'avis</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/app.js"></script>
+  <script>
+    // Gestion des URLs directes : /annonce/123
+    (function() {
+      const path = window.location.pathname
+      const m = path.match(/^\/annonce\/(\d+)$/)
+      if (m) {
+        document.addEventListener('DOMContentLoaded', () => {
+          showListing(parseInt(m[1]))
+        })
+      }
+      // PWA install prompt
+      let deferredPrompt = null
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault()
+        deferredPrompt = e
+        const banner = document.getElementById('pwa-install-banner')
+        if (banner) banner.classList.remove('hidden')
+      })
+      window.installPWA = function() {
+        if (!deferredPrompt) return
+        deferredPrompt.prompt()
+        deferredPrompt.userChoice.then(() => { deferredPrompt = null })
+        const banner = document.getElementById('pwa-install-banner')
+        if (banner) banner.classList.add('hidden')
+      }
+      window.dismissPWA = function() {
+        const banner = document.getElementById('pwa-install-banner')
+        if (banner) banner.classList.add('hidden')
+      }
+
+      // Enregistrement du Service Worker
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/static/sw.js')
+            .then(reg => console.log('SW enregistré', reg.scope))
+            .catch(err => console.log('SW erreur', err))
+        })
+      }
+    })()
+  </script>
 </body>
 </html>`)
 })

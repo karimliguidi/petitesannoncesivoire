@@ -59,6 +59,48 @@ let currentChatListingId = null
 let currentChatOtherUserId = null
 let currentModalListingId = null
 let favoriteIds   = new Set()
+let withPhotoFilter = false
+let currentReviewSellerId = null
+let currentReviewListingId = null
+let currentReviewRating = 0
+
+// ── Utilitaires ─────────────────────────────────────────────
+function formatPrice(p) { return new Intl.NumberFormat('fr-CI').format(p) + ' FCFA' }
+function timeAgo(dt) {
+  const diff = Date.now() - new Date(dt).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 2) return 'À l\'instant'
+  if (mins < 60) return `Il y a ${mins} min`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `Il y a ${hrs}h`
+  const days = Math.floor(hrs / 24)
+  if (days < 7) return `Il y a ${days}j`
+  if (days < 30) return `Il y a ${Math.floor(days/7)} sem`
+  return `Il y a ${Math.floor(days/30)} mois`
+}
+function escHtml(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') }
+function renderStars(rating, small = false) {
+  if (!rating) return ''
+  const size = small ? 'text-xs' : 'text-sm'
+  const full = Math.floor(rating)
+  const half = rating - full >= 0.5
+  let stars = ''
+  for (let i = 1; i <= 5; i++) {
+    if (i <= full) stars += `<i class="fas fa-star text-yellow-400 ${size}"></i>`
+    else if (i === full + 1 && half) stars += `<i class="fas fa-star-half-alt text-yellow-400 ${size}"></i>`
+    else stars += `<i class="far fa-star text-gray-300 ${size}"></i>`
+  }
+  return stars
+}
+
+// ── URLs directes ─────────────────────────────────────────────
+function getShareUrl(listingId) {
+  return `${window.location.origin}/annonce/${listingId}`
+}
+function copyLink(listingId) {
+  const url = listingId ? getShareUrl(listingId) : window.location.href
+  navigator.clipboard.writeText(url).then(() => showToast('Lien copié ! 🔗')).catch(() => showToast('Impossible de copier', 'error'))
+}
 
 // ── Init ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -107,8 +149,12 @@ function showPage(page) {
   if (page === 'notifications')   loadNotifications()
   if (page === 'profile-edit')    loadProfileEdit()
   if (page === 'admin')           { loadAdminStats(); adminTab('stats') }
+  // Mettre à jour l'URL sans rechargement
+  if (page === 'home') history.pushState({page}, '', '/')
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
+
+// showPage redéfini ci-dessus avec pushState
 
 function updateNav() {
   const guestEl  = document.getElementById('nav-guest')
@@ -208,6 +254,13 @@ function resetFilters() {
   document.getElementById('filter-sort').value = 'recent'
 }
 
+// ── Filtre photo rapide ──────────────────────────────────────
+function togglePhotoFilter() {
+  withPhotoFilter = document.getElementById('filter-with-photo')?.checked || false
+  currentPage = 0
+  loadListings('', activeFilter || '')
+}
+
 // ── Chargement des annonces ──────────────────────────────────
 async function loadListings(search = '', category = '', location = '') {
   currentPage = 0
@@ -215,12 +268,22 @@ async function loadListings(search = '', category = '', location = '') {
   if (search)   url += `&search=${encodeURIComponent(search)}`
   if (category) url += `&category=${encodeURIComponent(category)}`
   if (location) url += `&location=${encodeURIComponent(location)}`
+  if (withPhotoFilter) url += `&with_photo=1`
   await loadListingsByUrl(url)
 }
 
 async function loadListingsByUrl(url) {
   const grid = document.getElementById('listings-grid')
-  grid.innerHTML = `<div class="col-span-full text-center text-gray-400 py-12"><i class="fas fa-spinner fa-spin text-3xl mb-3"></i></div>`
+  // Skeleton loading
+  grid.innerHTML = [...Array(8)].map(() => `
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="h-40 skeleton"></div>
+      <div class="p-3 space-y-2">
+        <div class="h-4 skeleton rounded w-3/4"></div>
+        <div class="h-3 skeleton rounded w-full"></div>
+        <div class="h-3 skeleton rounded w-1/2"></div>
+      </div>
+    </div>`).join('')
   document.getElementById('pagination').classList.add('hidden')
   try {
     const res  = await fetch(url)
@@ -240,10 +303,11 @@ function renderListings(listings) {
       <i class="fas fa-search text-4xl mb-4 opacity-50"></i>
       <p class="text-lg font-medium">Aucune annonce trouvée</p>
       <p class="text-sm mt-1">Essaie avec d'autres termes ou filtres</p>
+      ${withPhotoFilter ? '<button onclick="document.getElementById(\"filter-with-photo\").checked=false;togglePhotoFilter()" class="mt-3 text-sm text-primary-600 hover:underline">Voir toutes les annonces</button>' : ''}
     </div>`
     return
   }
-  grid.innerHTML = listings.map(l => listingCard(l)).join('')
+  grid.innerHTML = listings.map(l => listingCard(l)).join()
 }
 
 function renderPagination(baseUrl) {
@@ -287,6 +351,7 @@ function listingCard(l) {
                                  : `<span class="text-gray-400 text-xs">Prix à débattre</span>`
   const date  = timeAgo(l.created_at)
   const isFav = favoriteIds.has(l.id)
+  const isSold = l.status === 'sold'
 
   const thumbnail = l.has_image
     ? `<img src="/api/listings/${l.id}/image" alt="${escHtml(l.title)}" class="w-full h-full object-cover"
@@ -298,22 +363,33 @@ function listingCard(l) {
     ? `<span class="absolute bottom-2 left-2 bg-black/50 text-white text-xs px-1.5 py-0.5 rounded-lg backdrop-blur-sm flex items-center gap-1"><i class="fas fa-images text-xs"></i>${parseInt(l.extra_images_count)+1}</span>`
     : ''
 
-  // Bouton WhatsApp si contact disponible
-  const waBtn = l.contact ? `
+  // Badge vendu
+  const soldBadge = isSold
+    ? `<span class="absolute inset-0 bg-black/40 flex items-center justify-center"><span class="bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full rotate-[-10deg] shadow">VENDU</span></span>`
+    : ''
+
+  // Bouton WhatsApp
+  const waBtn = (l.contact && !isSold) ? `
     <button onclick="event.stopPropagation();openWhatsApp('${escHtml(l.contact)}','${escHtml(l.title)}')"
       class="absolute bottom-2 right-2 bg-green-500 hover:bg-green-600 text-white rounded-full w-8 h-8 flex items-center justify-center shadow-md transition z-10"
       title="Contacter sur WhatsApp">
       <i class="fab fa-whatsapp text-base"></i>
     </button>` : ''
 
+  // Vues
+  const viewsBadge = (l.views_count > 0)
+    ? `<span class="text-xs text-gray-300 flex items-center gap-0.5"><i class="fas fa-eye text-xs"></i>${l.views_count}</span>`
+    : ''
+
   return `
-  <div class="bg-white rounded-xl border border-gray-200 hover:border-primary-300 hover:shadow-md transition cursor-pointer overflow-hidden group relative"
+  <div class="bg-white rounded-xl border ${isSold ? 'border-red-200 opacity-75' : 'border-gray-200 hover:border-primary-300 hover:shadow-md'} transition cursor-pointer overflow-hidden group relative"
        onclick="showListing(${l.id})">
     <div class="h-40 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center relative overflow-hidden">
       ${thumbnail}
+      ${soldBadge}
       <span class="absolute top-2 left-2 text-xs font-medium px-2 py-0.5 rounded-full border ${badge} bg-white/90 backdrop-blur-sm">${l.category}</span>
       ${photosBadge}
-      ${currentUser ? `
+      ${currentUser && !isSold ? `
         <button onclick="event.stopPropagation();toggleFavorite(${l.id},this)"
           class="absolute top-2 right-2 w-7 h-7 rounded-full bg-white/90 flex items-center justify-center shadow hover:bg-white transition"
           title="${isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}">
@@ -330,7 +406,7 @@ function listingCard(l) {
       </div>
       <div class="flex items-center justify-between pt-2 border-t border-gray-100">
         <span class="text-xs text-gray-400 truncate"><i class="fas fa-user mr-1"></i>${escHtml(l.author_name)}</span>
-        <span class="text-xs text-gray-300">${date}</span>
+        <div class="flex items-center gap-2">${viewsBadge}<span class="text-xs text-gray-300">${date}</span></div>
       </div>
     </div>
   </div>`
@@ -339,6 +415,8 @@ function listingCard(l) {
 // ── Détail d'une annonce ──────────────────────────────────────
 async function showListing(id) {
   showPage('listing-detail')
+  // Mettre à jour l'URL
+  history.pushState({page:'listing', id}, '', `/annonce/${id}`)
   const content = document.getElementById('listing-detail-content')
   content.innerHTML = `<div class="text-center py-16 text-gray-400"><i class="fas fa-spinner fa-spin text-3xl"></i></div>`
 
@@ -354,9 +432,11 @@ async function showListing(id) {
     const date    = new Date(l.created_at).toLocaleDateString('fr-FR', { day:'numeric', month:'long', year:'numeric' })
     const isOwner = currentUser && l.user_id === currentUser.id
     const isFav   = favoriteIds.has(l.id)
+    const isSold  = l.status === 'sold'
 
-    // URL de partage
-    const shareUrl = encodeURIComponent(window.location.href)
+    // URL de partage directe
+    const directUrl = getShareUrl(id)
+    const shareUrl  = encodeURIComponent(directUrl)
     const shareText = encodeURIComponent(`${l.title} — ${l.price ? formatPrice(l.price) : 'Prix à débattre'} sur PetitesAnnoncesIvoire.com`)
 
     // ── Galerie swipeable ──────────────────────────────────────
@@ -402,7 +482,12 @@ async function showListing(id) {
         </div>`
     }
 
-    // Boutons WhatsApp + partage
+    // Boutons WhatsApp + Appeler + partage
+    const callBtn = l.contact ? `
+      <a href="tel:${escHtml(l.contact)}" onclick="event.stopPropagation()"
+         class="flex-1 border border-gray-300 text-gray-700 hover:bg-gray-50 py-3 rounded-xl font-semibold transition text-sm text-center flex items-center justify-center gap-2">
+        <i class="fas fa-phone text-green-600"></i>Appeler
+      </a>` : ''
     const whatsappBtn = l.contact ? `
       <a href="https://wa.me/${formatPhoneForWA(l.contact)}?text=${encodeURIComponent('Bonjour, je suis intéressé par votre annonce : ' + l.title + ' sur PetitesAnnoncesIvoire.com')}"
          target="_blank" rel="noopener"
@@ -410,14 +495,29 @@ async function showListing(id) {
         <i class="fab fa-whatsapp text-lg"></i>WhatsApp
       </a>` : ''
 
+    // Note vendeur
+    const sellerRating = l.seller_rating
+      ? `<div class="flex items-center gap-1 ml-1">${renderStars(l.seller_rating, true)}<span class="text-xs text-gray-400">(${l.seller_reviews_count})</span></div>`
+      : ''
+
+    // Badge vendu
+    const soldBanner = isSold
+      ? `<div class="bg-red-50 border border-red-200 rounded-xl px-4 py-2 mb-4 flex items-center gap-2"><i class="fas fa-check-circle text-red-500"></i><span class="text-red-700 font-semibold text-sm">Cette annonce est marquée comme vendue</span></div>`
+      : ''
+
     content.innerHTML = `
       <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
         ${imageSection}
         <div class="p-6">
+          ${soldBanner}
           <div class="flex items-start justify-between gap-4 mb-4 flex-wrap">
             <div>
               <span class="text-xs font-medium px-3 py-1 rounded-full border ${badge} mb-2 inline-block"><i class="fas ${icon} mr-1"></i>${l.category}</span>
               <h1 class="text-xl font-bold text-gray-800">${escHtml(l.title)}</h1>
+              <div class="flex items-center gap-3 mt-1 text-xs text-gray-400">
+                <span><i class="fas fa-eye mr-1"></i>${l.views_count || 0} vue${(l.views_count||0) > 1 ? 's' : ''}</span>
+                <span><i class="fas fa-calendar mr-1"></i>${date}</span>
+              </div>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
               ${price}
@@ -436,22 +536,24 @@ async function showListing(id) {
             ${l.location ? `<div class="flex items-center gap-2 text-gray-600"><i class="fas fa-map-marker-alt text-primary-500 w-5"></i>${escHtml(l.location)}</div>` : ''}
             ${l.contact  ? `<div class="flex items-center gap-2 text-gray-600"><i class="fas fa-phone text-primary-500 w-5"></i>${escHtml(l.contact)}</div>` : ''}
             <div class="flex items-center gap-2 text-gray-600 cursor-pointer hover:text-primary-600" onclick="showPublicProfile(${l.user_id})">
-              <i class="fas fa-user text-primary-500 w-5"></i>${escHtml(l.author_name)}
+              <i class="fas fa-user text-primary-500 w-5"></i>${escHtml(l.author_name)}${sellerRating}
             </div>
-            <div class="flex items-center gap-2 text-gray-400"><i class="fas fa-calendar w-5"></i>${date}</div>
+            <div class="flex items-center gap-2 text-gray-400"><i class="fas fa-clock w-5"></i>${date}</div>
           </div>
 
           <!-- Boutons d'action principaux -->
-          ${!isOwner && currentUser ? `
+          ${!isOwner && currentUser && !isSold ? `
             <div class="flex gap-2 mb-3 flex-wrap">
+              ${callBtn}
               ${whatsappBtn}
               <button onclick="openMessageModal(${l.id},'${escHtml(l.title)}')"
                 class="flex-1 bg-primary-600 text-white py-3 rounded-xl font-semibold hover:bg-primary-700 transition text-sm flex items-center justify-center gap-2">
                 <i class="fas fa-envelope"></i>Message
               </button>
             </div>` : ''}
-          ${!currentUser ? `
+          ${!currentUser && !isSold ? `
             <div class="flex gap-2 mb-3 flex-wrap">
+              ${callBtn}
               ${l.contact ? `
               <a href="https://wa.me/${formatPhoneForWA(l.contact)}?text=${encodeURIComponent('Bonjour, je suis intéressé par votre annonce : ' + l.title)}"
                  target="_blank" rel="noopener"
@@ -478,7 +580,7 @@ async function showListing(id) {
                class="w-8 h-8 bg-sky-500 hover:bg-sky-600 text-white rounded-full flex items-center justify-center transition text-sm" title="Twitter/X">
               <i class="fab fa-twitter"></i>
             </a>
-            <button onclick="copyLink()" class="w-8 h-8 bg-gray-200 hover:bg-gray-300 text-gray-600 rounded-full flex items-center justify-center transition text-sm" title="Copier le lien">
+            <button onclick="copyLink(${l.id})" class="w-8 h-8 bg-gray-200 hover:bg-gray-300 text-gray-600 rounded-full flex items-center justify-center transition text-sm" title="Copier le lien">
               <i class="fas fa-link"></i>
             </button>
             ${currentUser && !isOwner ? `
@@ -491,6 +593,8 @@ async function showListing(id) {
           ${isOwner ? `
             <div class="flex gap-2 flex-wrap pt-2">
               <button onclick="showEditListing(${l.id})" class="flex-1 bg-primary-50 text-primary-600 hover:bg-primary-100 py-2 rounded-xl font-medium text-sm transition"><i class="fas fa-edit mr-2"></i>Modifier</button>
+              <button onclick="markAsSold(${l.id})" class="flex-1 ${isSold ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-red-50 text-red-600 hover:bg-red-100'} py-2 rounded-xl font-medium text-sm transition"><i class="fas ${isSold ? 'fa-undo' : 'fa-check-circle'} mr-2"></i>${isSold ? 'Réactiver' : 'Vendu'}</button>
+              <button onclick="boostListing(${l.id})" class="flex-1 bg-yellow-50 text-yellow-600 hover:bg-yellow-100 py-2 rounded-xl font-medium text-sm transition"><i class="fas fa-rocket mr-2"></i>Remonter</button>
               <button onclick="archiveListing(${l.id})" class="flex-1 bg-gray-100 text-gray-600 hover:bg-gray-200 py-2 rounded-xl font-medium text-sm transition"><i class="fas fa-archive mr-2"></i>Archiver</button>
               <button onclick="deleteListing(${l.id})" class="flex-1 bg-red-50 text-red-600 hover:bg-red-100 py-2 rounded-xl font-medium text-sm transition"><i class="fas fa-trash mr-2"></i>Supprimer</button>
             </div>` : ''}
@@ -541,7 +645,34 @@ async function showListing(id) {
           </div>
 
         </div>
-      </div>`
+      </div>
+
+      <!-- Section avis vendeur -->
+      <div class="bg-white rounded-2xl shadow-sm mt-4 p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-bold text-gray-800 text-base"><i class="fas fa-star text-yellow-400 mr-2"></i>Avis sur ce vendeur</h3>
+          ${!isOwner && currentUser ? `
+          <button onclick="openReviewModal(${l.user_id}, ${l.id}, '${escHtml(l.author_name)}')"
+            class="text-sm bg-yellow-50 text-yellow-600 hover:bg-yellow-100 px-3 py-1.5 rounded-xl font-medium transition border border-yellow-200">
+            <i class="fas fa-pen mr-1"></i>Laisser un avis
+          </button>` : ''}
+        </div>
+        <div id="seller-reviews-section">
+          <div class="text-center text-gray-400 py-4 text-sm"><i class="fas fa-spinner fa-spin"></i></div>
+        </div>
+      </div>
+
+      <!-- Section annonces similaires -->
+      <div id="similar-listings-section" class="hidden mt-4">
+        <h3 class="font-bold text-gray-800 text-base mb-3"><i class="fas fa-th-large text-primary-500 mr-2"></i>Annonces similaires</h3>
+        <div id="similar-listings-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      </div>
+    </div>`
+
+    // Charger avis et annonces similaires en parallèle
+    loadSellerReviews(l.user_id)
+    loadSimilarListings(id)
+
   } catch {
     content.innerHTML = `<div class="text-center py-16 text-red-400"><i class="fas fa-exclamation-triangle text-4xl mb-4"></i><p>Annonce introuvable</p></div>`
   }
@@ -1334,13 +1465,7 @@ function openWhatsApp(contact, title) {
   window.open(`https://wa.me/${phone}?text=${msg}`, '_blank', 'noopener')
 }
 
-function copyLink() {
-  navigator.clipboard.writeText(window.location.href).then(() => {
-    showToast('Lien copié ! 🔗')
-  }).catch(() => {
-    showToast('Impossible de copier', 'error')
-  })
-}
+// copyLink définie en haut du fichier (gestion URLs directes)
 
 // ── Signalement ───────────────────────────────────────────────
 let currentReportListingId = null
@@ -1923,23 +2048,151 @@ async function adminToggleAdmin(id, btn) {
   } catch { showToast('Erreur','error') }
 }
 
-// ── Utilitaires ────────────────────────────────────────────────
-function formatPrice(p) {
-  if (p===0) return 'Gratuit'
-  return new Intl.NumberFormat('fr-FR',{style:'decimal',maximumFractionDigits:0}).format(p)+' FCFA'
+// ── Marquer comme vendu / Réactiver ──────────────────────────
+async function markAsSold(id) {
+  if (!authToken) { showPage('login'); return }
+  try {
+    const res = await fetch(`/api/listings/${id}/sold`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${authToken}` }
+    })
+    const d = await res.json()
+    if (!res.ok) { showToast(d.error || 'Erreur', 'error'); return }
+    showToast(d.message)
+    showListing(id)
+  } catch { showToast('Erreur serveur', 'error') }
 }
 
-function timeAgo(dateStr) {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const m = Math.floor(diff/60000), h = Math.floor(diff/3600000), d = Math.floor(diff/86400000)
-  if (m<2)  return 'À l\'instant'
-  if (m<60) return `Il y a ${m} min`
-  if (h<24) return `Il y a ${h}h`
-  if (d<7)  return `Il y a ${d}j`
-  return new Date(dateStr).toLocaleDateString('fr-FR',{day:'numeric',month:'short'})
+// ── Remonter une annonce (boost) ──────────────────────────────
+async function boostListing(id) {
+  if (!authToken) { showPage('login'); return }
+  try {
+    const res = await fetch(`/api/listings/${id}/boost`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${authToken}` }
+    })
+    const d = await res.json()
+    if (!res.ok) { showToast(d.error || 'Impossible de remonter', 'error'); return }
+    showToast(d.message + ' 🚀')
+    showListing(id)
+  } catch { showToast('Erreur serveur', 'error') }
 }
 
-function escHtml(str) {
-  if (!str) return ''
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+// ── Modèles de messages rapides ───────────────────────────────
+function setQuickMsg(text) {
+  const el = document.getElementById('modal-message-text')
+  if (el) { el.value = text; el.focus() }
 }
+
+// ── Système d'avis vendeur ─────────────────────────────────────
+function openReviewModal(sellerId, listingId, sellerName) {
+  if (!authToken) { showPage('login'); return }
+  currentReviewSellerId  = sellerId
+  currentReviewListingId = listingId
+  currentReviewRating    = 0
+  const nameEl = document.getElementById('review-seller-name')
+  if (nameEl) nameEl.textContent = `Vendeur : ${sellerName}`
+  // Réinitialiser les étoiles
+  setReviewRating(0)
+  const commentEl = document.getElementById('review-comment')
+  if (commentEl) commentEl.value = ''
+  const errEl = document.getElementById('review-error')
+  if (errEl) errEl.classList.add('hidden')
+  document.getElementById('modal-review').classList.remove('hidden')
+}
+
+function closeReviewModal() {
+  document.getElementById('modal-review').classList.add('hidden')
+}
+
+function setReviewRating(val) {
+  currentReviewRating = val
+  const stars = document.querySelectorAll('#star-rating-input .star')
+  stars.forEach((s, i) => {
+    s.classList.toggle('text-yellow-400', i < val)
+    s.classList.toggle('text-gray-200',   i >= val)
+  })
+}
+
+async function submitReview() {
+  const errEl = document.getElementById('review-error')
+  errEl.classList.add('hidden')
+  if (!currentReviewRating) {
+    errEl.textContent = 'Veuillez donner une note (1 à 5 étoiles)'
+    errEl.classList.remove('hidden'); return
+  }
+  const comment = document.getElementById('review-comment').value.trim()
+  try {
+    const res = await fetch('/api/reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({
+        seller_id:  currentReviewSellerId,
+        listing_id: currentReviewListingId,
+        rating:     currentReviewRating,
+        comment:    comment || null
+      })
+    })
+    const d = await res.json()
+    if (!res.ok) { errEl.textContent = d.error; errEl.classList.remove('hidden'); return }
+    closeReviewModal()
+    showToast('Avis publié ! ⭐')
+    // Recharger la section avis si visible
+    loadSellerReviews(currentReviewSellerId)
+  } catch { errEl.textContent = 'Erreur serveur'; errEl.classList.remove('hidden') }
+}
+
+async function loadSellerReviews(sellerId, containerId = 'seller-reviews-section') {
+  const el = document.getElementById(containerId)
+  if (!el) return
+  try {
+    const res = await fetch(`/api/reviews/seller/${sellerId}`)
+    const { reviews, avg_rating, total } = await res.json()
+
+    if (!total) {
+      el.innerHTML = `<p class="text-sm text-gray-400 italic">Aucun avis pour ce vendeur.</p>`
+      return
+    }
+
+    const avgStars = renderStars(avg_rating)
+    el.innerHTML = `
+      <div class="flex items-center gap-3 mb-3 pb-3 border-b border-gray-100">
+        <div class="flex items-center gap-1">${avgStars}</div>
+        <span class="font-bold text-gray-800">${avg_rating}</span>
+        <span class="text-sm text-gray-400">(${total} avis)</span>
+      </div>
+      ${reviews.map(r => `
+        <div class="flex gap-3 py-3 border-b border-gray-100 last:border-0">
+          <div class="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center shrink-0 overflow-hidden">
+            ${r.reviewer_avatar ? `<img src="${r.reviewer_avatar}" class="w-full h-full object-cover"/>` : `<i class="fas fa-user text-primary-400 text-xs"></i>`}
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-0.5">
+              <span class="text-sm font-semibold text-gray-800">${escHtml(r.reviewer_name)}</span>
+              <div class="flex">${renderStars(r.rating, true)}</div>
+            </div>
+            ${r.comment ? `<p class="text-xs text-gray-600">${escHtml(r.comment)}</p>` : ''}
+            <p class="text-xs text-gray-300 mt-0.5">${timeAgo(r.created_at)} · ${escHtml(r.listing_title)}</p>
+          </div>
+        </div>`).join('')}`
+  } catch {
+    el.innerHTML = `<p class="text-sm text-gray-400">Impossible de charger les avis.</p>`
+  }
+}
+
+// ── Annonces similaires ──────────────────────────────────────
+async function loadSimilarListings(listingId) {
+  const section = document.getElementById('similar-listings-section')
+  if (!section) return
+  try {
+    const res = await fetch(`/api/listings/${listingId}/similar`)
+    const { listings } = await res.json()
+    if (!listings || !listings.length) { section.classList.add('hidden'); return }
+    section.classList.remove('hidden')
+    document.getElementById('similar-listings-grid').innerHTML =
+      listings.map(l => listingCard(l)).join('')
+  } catch { section.classList.add('hidden') }
+}
+
+// ── Utilitaires (fin de fichier) ─────────────────────────────
+// formatPrice, timeAgo, escHtml, renderStars définis en haut du fichier
